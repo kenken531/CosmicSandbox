@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cosmic Playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- TOP BAR -->
+  <header id="topbar">
+    <div id="logo">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <circle cx="10" cy="10" r="3" fill="var(--accent)"/>
+        <circle cx="10" cy="10" r="7" stroke="var(--accent)" stroke-width="0.8" fill="none" stroke-dasharray="2 2"/>
+        <circle cx="10" cy="3" r="1.2" fill="var(--accent-dim)"/>
+        <circle cx="17" cy="10" r="0.8" fill="var(--star-color)"/>
+        <circle cx="3" cy="14" r="0.6" fill="var(--star-color)"/>
+      </svg>
+      <span>COSMIC PLAYGROUND</span>
+    </div>
+
+    <div id="toolbar">
+      <button class="tool-btn" id="btn-play" title="Play / Pause (Space)">
+        <svg id="icon-play" width="14" height="14" viewBox="0 0 14 14"><polygon points="3,1 13,7 3,13" fill="currentColor"/></svg>
+        <svg id="icon-pause" width="14" height="14" viewBox="0 0 14 14" style="display:none"><rect x="2" y="1" width="4" height="12" fill="currentColor"/><rect x="8" y="1" width="4" height="12" fill="currentColor"/></svg>
+        <span id="play-label">PLAY</span>
+      </button>
+      <button class="tool-btn" id="btn-reset-view" title="Reset View (R)">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7a5 5 0 1 0 1-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M3 1v3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        VIEW
+      </button>
+      <button class="tool-btn danger" id="btn-clear" title="Clear All (C)">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M5 4V2h4v2M6 7v4M8 7v4M3 4l1 8h6l1-8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        CLEAR
+      </button>
+
+      <div class="toolbar-sep"></div>
+
+      <div class="speed-control">
+        <span class="control-label">SPEED</span>
+        <input type="range" id="speed-slider" min="-2" max="2" step="0.1" value="0">
+        <span id="speed-label">1×</span>
+      </div>
+    </div>
+
+    <div id="hud">
+      <div class="hud-stat"><span class="hud-val" id="hud-bodies">0</span><span class="hud-key">BODIES</span></div>
+      <div class="hud-stat"><span class="hud-val" id="hud-fps">60</span><span class="hud-key">FPS</span></div>
+      <div class="hud-stat"><span class="hud-val" id="hud-time">0.0</span><span class="hud-key">YRS</span></div>
+    </div>
+  </header>
+
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <div class="sidebar-section-title">PLACE OBJECT</div>
+
+    <div class="palette-grid">
+      <div class="palette-item" draggable="true" data-type="star" title="Star — high mass, emits light">
+        <div class="palette-icon star-icon">
+          <svg width="28" height="28" viewBox="0 0 28 28">
+            <circle cx="14" cy="14" r="6" fill="#FFC940"/>
+            <circle cx="14" cy="14" r="9" fill="none" stroke="#FFC940" stroke-width="0.5" opacity="0.4"/>
+            <circle cx="14" cy="14" r="12" fill="none" stroke="#FFC940" stroke-width="0.3" opacity="0.2"/>
+          </svg>
+        </div>
+        <span class="palette-label">STAR</span>
+      </div>
+
+      <div class="palette-item" draggable="true" data-type="planet" title="Planet — medium mass, orbits stars">
+        <div class="palette-icon planet-icon">
+          <svg width="28" height="28" viewBox="0 0 28 28">
+            <circle cx="14" cy="14" r="7" fill="#4B8FDE"/>
+            <ellipse cx="14" cy="14" rx="13" ry="4" fill="none" stroke="#4B8FDE" stroke-width="0.8" opacity="0.5" transform="rotate(-20,14,14)"/>
+          </svg>
+        </div>
+        <span class="palette-label">PLANET</span>
+      </div>
+
+      <div class="palette-item locked" title="Coming in Phase 5" data-type="blackhole">
+        <div class="palette-icon bh-icon">
+          <svg width="28" height="28" viewBox="0 0 28 28">
+            <circle cx="14" cy="14" r="5" fill="#111"/>
+            <circle cx="14" cy="14" r="5" fill="none" stroke="#8B5CF6" stroke-width="1.5"/>
+            <ellipse cx="14" cy="14" rx="12" ry="3.5" fill="none" stroke="#8B5CF6" stroke-width="0.6" opacity="0.4"/>
+          </svg>
+        </div>
+        <span class="palette-label">BLACK HOLE</span>
+        <div class="locked-badge">SOON</div>
+      </div>
+
+      <div class="palette-item locked" title="Coming in Phase 5" data-type="comet">
+        <div class="palette-icon comet-icon">
+          <svg width="28" height="28" viewBox="0 0 28 28">
+            <circle cx="20" cy="8" r="3" fill="#A0D4FF"/>
+            <path d="M17 11 Q10 16 4 22" stroke="#A0D4FF" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+            <path d="M17 11 Q9 14 3 19" stroke="#A0D4FF" stroke-width="0.8" stroke-linecap="round" opacity="0.3"/>
+          </svg>
+        </div>
+        <span class="palette-label">COMET</span>
+        <div class="locked-badge">SOON</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section-title" style="margin-top:20px">INSTRUCTIONS</div>
+    <div class="instructions">
+      <div class="instr-row"><kbd>Drag</kbd> object to canvas</div>
+      <div class="instr-row"><kbd>Click</kbd> body to select</div>
+      <div class="instr-row"><kbd>Mid-drag</kbd> to pan</div>
+      <div class="instr-row"><kbd>Scroll</kbd> to zoom</div>
+      <div class="instr-row"><kbd>Space</kbd> play / pause</div>
+      <div class="instr-row"><kbd>Del</kbd> remove selected</div>
+      <div class="instr-row"><kbd>R</kbd> reset view</div>
+      <div class="instr-row"><kbd>C</kbd> clear all</div>
+    </div>
+  </aside>
+
+  <!-- CANVAS -->
+  <main id="canvas-container">
+    <canvas id="main-canvas"></canvas>
+    <div id="empty-hint">
+      <div class="hint-icon">✦</div>
+      <div class="hint-title">The universe awaits</div>
+      <div class="hint-sub">Drag a star or planet from the left panel onto the canvas</div>
+    </div>
+    <!-- Ghost body that follows cursor during drag -->
+    <div id="drag-ghost"></div>
+  </main>
+
+  <!-- RIGHT PANEL: properties -->
+  <aside id="props-panel" class="hidden">
+    <div class="props-header">
+      <span id="props-type-label">PLANET</span>
+      <button id="btn-delete-body" title="Delete (Del)">
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1 1l11 11M12 1L1 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <div class="props-body">
+      <div class="prop-group">
+        <label>NAME</label>
+        <input type="text" id="prop-name" class="prop-input" value="New Planet">
+      </div>
+      <div class="prop-group">
+        <label>MASS <span class="prop-unit">× 10²⁴ kg</span></label>
+        <input type="number" id="prop-mass" class="prop-input" min="0.001" step="0.1" value="1">
+      </div>
+      <div class="prop-group">
+        <label>RADIUS <span class="prop-unit">km</span></label>
+        <input type="number" id="prop-radius" class="prop-input" min="100" step="100" value="6371">
+      </div>
+      <div class="prop-group two-col">
+        <div>
+          <label>VEL X <span class="prop-unit">km/s</span></label>
+          <input type="number" id="prop-vx" class="prop-input" step="0.1" value="0">
+        </div>
+        <div>
+          <label>VEL Y <span class="prop-unit">km/s</span></label>
+          <input type="number" id="prop-vy" class="prop-input" step="0.1" value="0">
+        </div>
+      </div>
+      <div class="prop-group">
+        <label>COLOR</label>
+        <div class="color-row">
+          <input type="color" id="prop-color" value="#4B8FDE">
+          <span id="prop-color-hex">#4B8FDE</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="props-stats">
+      <div class="stat-row"><span class="stat-label">SPEED</span><span class="stat-val" id="stat-speed">0 km/s</span></div>
+      <div class="stat-row"><span class="stat-label">DIST TO ORIGIN</span><span class="stat-val" id="stat-dist">0 AU</span></div>
+    </div>
+  </aside>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
