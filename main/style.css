@@ -407,8 +407,263 @@ input[type="color"] {
   color: var(--accent);
 }
 
+/* ── MINIMAP ─────────────────────────────────────────────── */
+#minimap {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  width: 160px;
+  height: 120px;
+  border: 1px solid var(--border-hi);
+  border-radius: 4px;
+  background: rgba(5,8,16,0.85);
+  z-index: 80;
+  pointer-events: none;
+  opacity: 0.85;
+}
+body.props-open #minimap {
+  right: calc(var(--props-w) + 16px);
+}
+
+/* ── TOOLTIP ─────────────────────────────────────────────── */
+#tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 200;
+  padding: 6px 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border-hi);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text);
+  white-space: nowrap;
+  display: none;
+  line-height: 1.6;
+}
+
+/* ── PRESETS MODAL ───────────────────────────────────────── */
+#presets-overlay {
+  position: fixed; inset: 0;
+  background: rgba(5,8,16,0.75);
+  backdrop-filter: blur(4px);
+  z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+}
+#presets-overlay.hidden { display: none; }
+
+#presets-modal {
+  background: var(--bg2);
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+.modal-header button {
+  background: none; border: none;
+  color: var(--text-muted); cursor: pointer;
+  font-size: 14px; line-height: 1;
+  padding: 4px;
+  transition: color 0.15s;
+}
+.modal-header button:hover { color: var(--danger); }
+
+#presets-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.preset-card {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.preset-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  transform: translateY(-1px);
+}
+.preset-card-title {
+  font-family: var(--font-display);
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.preset-card-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.preset-card-meta {
+  margin-top: 8px;
+  font-family: var(--font-display);
+  font-size: 8px; font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--accent-dim);
+}
+
 /* ── SELECTION RING ANIMATION ───────────────────────────── */
 @keyframes spin-ring {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+/* ── BODY DRAG CURSOR ────────────────────────────────────── */
+#canvas-container.dragging-body { cursor: grabbing !important; }
+
+/* ── LOAD label styled as tool-btn ──────────────────────── */
+label.tool-btn { cursor: pointer; }
+
+/* ── Preset card alternating accent ─────────────────────── */
+.preset-card:nth-child(even):hover { border-color: #8B5CF6; background: rgba(139,92,246,0.08); }
+
+/* ── PHASE 3 STYLES ──────────────────────────────────────── */
+
+/* HUD separator */
+.hud-sep {
+  width: 1px; height: 28px;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* Energy drift color coding */
+#hud-drift[data-good="true"]  { color: #4ade80; }
+#hud-drift[data-good="false"] { color: var(--danger); }
+
+/* SIM SETTINGS PANEL */
+#sim-panel {
+  position: fixed;
+  top: calc(var(--topbar-h) + 8px);
+  right: 16px;
+  width: 300px;
+  background: var(--bg2);
+  border: 1px solid var(--border-hi);
+  border-radius: 8px;
+  z-index: 150;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  transition: opacity 0.15s, transform 0.15s;
+}
+#sim-panel.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+}
+body.props-open #sim-panel { right: calc(var(--props-w) + 16px); }
+
+.sim-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sim-panel-header > span {
+  font-family: var(--font-display);
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+.sim-panel-header button {
+  background: none; border: none;
+  color: var(--text-muted); cursor: pointer;
+  padding: 4px; transition: color 0.15s;
+}
+.sim-panel-header button:hover { color: var(--danger); }
+
+.sim-panel-body {
+  padding: 14px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.sim-panel-body input[type="range"] {
+  width: 100%; accent-color: var(--accent); cursor: pointer;
+}
+.sim-panel-body .prop-group {
+  display: flex; flex-direction: column; gap: 5px;
+}
+.sim-panel-body .prop-group > span {
+  font-family: var(--font-display);
+  font-size: 10px; font-weight: 700;
+  color: var(--accent);
+  text-align: right;
+}
+
+/* Energy readout block */
+.sim-energy-block {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.energy-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 10px;
+}
+.energy-row > span:first-child { color: var(--text-muted); font-size: 9px; letter-spacing: 0.06em; }
+.energy-row > span:last-child  { font-family: var(--font-mono); color: var(--text); }
+.drift-row > span:last-child   { font-family: var(--font-mono); color: var(--accent); }
+
+/* ── VELOCITY HINT & DIAL ────────────────────────────────── */
+.vel-hint {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  background: rgba(91,142,255,0.08);
+  border: 1px solid rgba(91,142,255,0.25);
+  border-radius: 4px;
+  font-family: var(--font-display);
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  animation: hint-pulse 2s ease-in-out infinite;
+}
+.vel-hint.hidden { display: none; }
+@keyframes hint-pulse {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 1;   }
+}
+
+/* Velocity arrow active state on canvas cursor */
+#canvas-container.vel-dragging { cursor: crosshair !important; }
+
+/* ── ORBIT PREVIEW HELPER ─────────────────────────────────── */
+/* shown in HUD when a body has zero velocity */
+.hud-orbit-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--accent-dim);
+  padding-left: 8px;
+}
+
+/* ── PHASE 5: EXOTIC BODY PALETTE ICONS ─────────────────── */
+.bh-icon     { filter: drop-shadow(0 0 4px rgba(139,92,246,0.7)); }
+.ns-icon     { filter: drop-shadow(0 0 4px rgba(160,239,255,0.7)); }
+.pulsar-icon { filter: drop-shadow(0 0 4px rgba(128,255,204,0.7)); }
+.comet-icon  { filter: drop-shadow(0 0 3px rgba(200,232,255,0.5)); }
+
+/* Spaghettification warning flash on HUD */
+@keyframes spag-flash {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; color: #f87171; }
 }
