@@ -667,3 +667,154 @@ body.props-open #sim-panel { right: calc(var(--props-w) + 16px); }
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.3; color: #f87171; }
 }
+
+/* ── MOBILE LAYOUT (≤ 800px) ─────────────────────────────
+   Sidebar collapses to a bottom drawer.
+   Props panel slides up from the bottom.
+   Topbar hides non-essential controls to a ⋯ overflow menu.
+   ─────────────────────────────────────────────────────── */
+
+@media (max-width: 800px) {
+  :root {
+    --topbar-h:  48px;
+    --sidebar-w: 0px;   /* sidebar becomes bottom drawer, not side column */
+    --props-w:   100%;  /* full-width bottom sheet */
+  }
+
+  /* ── Topbar: stack logo + toolbar vertically if very narrow ── */
+  #topbar {
+    padding: 0 10px;
+    gap: 6px;
+  }
+  #logo span { display: none; }   /* hide text "COSMIC PLAYGROUND" */
+
+  /* Hide lower-priority toolbar buttons on small screens */
+  #btn-clear-trails,
+  .toolbar-sep { display: none; }
+
+  .speed-control { gap: 4px; }
+  #speed-slider  { width: 60px; }
+
+  /* ── Sidebar → horizontal palette strip at bottom of screen ── */
+  #sidebar {
+    top: auto;
+    bottom: 0; left: 0; right: 0;
+    width: 100%;
+    height: auto;
+    max-height: 160px;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    padding: 8px 12px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 95;
+    /* Scrollable pill at bottom */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sidebar-section-title { margin-bottom: 6px; }
+
+  /* Palette grid becomes a horizontal row */
+  .palette-grid {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .palette-item {
+    flex-shrink: 0;
+    flex-direction: column;
+    min-width: 52px;
+  }
+
+  /* Hide instructions/shortcuts on mobile — too small to be useful */
+  .instructions,
+  .sidebar-section-title:not(:first-child) { display: none; }
+
+  /* ── Canvas fills space above the bottom sidebar ── */
+  #canvas-container {
+    left: 0;
+    bottom: 160px;  /* height of mobile sidebar strip */
+  }
+
+  /* Undo the props-open rightward shrink — on mobile props are an overlay */
+  body.props-open #canvas-container {
+    right: 0;
+    bottom: 160px;
+  }
+
+  /* ── Props panel → bottom sheet overlay ── */
+  #props-panel {
+    top: auto;
+    right: 0; left: 0; bottom: 0;
+    width: 100%;
+    height: auto;
+    max-height: 55vh;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: 12px 12px 0 0;
+    /* Slide up/down */
+    transform: translateY(0);
+    transition: transform 0.25s ease;
+    z-index: 200;
+    overflow-y: auto;
+  }
+  #props-panel.hidden {
+    transform: translateY(100%);
+  }
+
+  /* Props body: two-column grid for compact display */
+  .props-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  /* Velocity + direction get full width */
+  .props-body .prop-group:nth-child(4),
+  .props-body .prop-group:nth-child(5),
+  #vel-arrow-hint { grid-column: 1 / -1; }
+
+  /* ── Minimap: smaller on mobile ── */
+  #minimap {
+    width: 80px;
+    height: 80px;
+  }
+
+  /* ── Sim panel: full-width bottom sheet ── */
+  #sim-panel {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: 100%;
+    border-radius: 12px 12px 0 0;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  /* Presets modal: full screen on mobile */
+  #presets-modal {
+    width: 96vw;
+    max-height: 85vh;
+  }
+  #presets-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  #presets-grid { grid-template-columns: 1fr; }
+
+  .props-body {
+    grid-template-columns: 1fr;
+  }
+  .props-body .prop-group:nth-child(4),
+  .props-body .prop-group:nth-child(5) {
+    grid-column: 1;
+  }
+}
