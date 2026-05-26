@@ -48,20 +48,27 @@ export class Minimap {
       y: offY + (wy - minY) * scale
     });
 
-    // Draw trails (simplified — just endpoints)
+    // Draw trails (LOD: stride proportional to trail length so we never draw > 80 segments per body)
+    const MAX_TRAIL_SEGS = 80;
     for (const b of bodies) {
       const trail = b.getTrail();
       if (trail.length < 2) continue;
+      const stride = Math.max(1, Math.ceil(trail.length / MAX_TRAIL_SEGS));
       const hex = b.color;
       const r = parseInt(hex.slice(1,3),16);
       const g = parseInt(hex.slice(3,5),16);
       const bl = parseInt(hex.slice(5,7),16);
       ctx.beginPath();
-      for (let i = 0; i < trail.length; i++) {
+      let started = false;
+      for (let i = 0; i < trail.length; i += stride) {
         const p = toMini(trail[i].x, trail[i].y);
-        if (i === 0) ctx.moveTo(p.x, p.y);
+        if (!started) { ctx.moveTo(p.x, p.y); started = true; }
         else ctx.lineTo(p.x, p.y);
       }
+      // Always include the very last point for accuracy
+      const last = trail[trail.length - 1];
+      const lp   = toMini(last.x, last.y);
+      ctx.lineTo(lp.x, lp.y);
       ctx.strokeStyle = `rgba(${r},${g},${bl},0.3)`;
       ctx.lineWidth = 0.5;
       ctx.stroke();
