@@ -478,9 +478,11 @@ export class Renderer {
     if (len < 4) return;
 
     const angle = Math.atan2(dy, dx);
-    // Convert arrow pixels → AU/yr  (matches ui.js: scale = 100 * zoom)
-    const scale    = 100 * camera.zoom;
-    const speedAUyr = len / scale;
+    // Convert arrow pixels → AU/yr — MUST match ui.js _arrowToVelocity formula:
+    // ui.js: velocity = (screen_delta / zoom) * SENSITIVITY  where SENSITIVITY=10
+    // Old renderer used scale=100*zoom which was 1000x smaller than committed velocity
+    const SENSITIVITY = 10;
+    const speedAUyr = (len / camera.zoom) * SENSITIVITY;
     const speedKms  = speedAUyr * SIM.velUnit;
 
     // ── Orbit preview ring ────────────────────────────────

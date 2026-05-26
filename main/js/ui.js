@@ -18,6 +18,22 @@ function speedDirToVxy(speedKms, deg) {
   return { vx: speedAUyr * Math.cos(rad), vy: speedAUyr * Math.sin(rad) };
 }
 
+// Mass display helpers
+// Planets/comets: Earth masses (1 M⊕ = 6 units)
+// Stars/BH/NS/Pulsars: Solar masses (1 M☉ = 1,989,000 units)
+const STELLAR_TYPES = new Set(['star','blackhole','neutronstar','pulsar']);
+const M_EARTH  = 6;
+const M_SUN    = 1989000;
+
+function massToDisplay(body) {
+  if (STELLAR_TYPES.has(body.type)) return { val: body.mass / M_SUN,    unit: 'M☉ (solar masses)' };
+  return                                   { val: body.mass / M_EARTH,  unit: 'M⊕ (Earth masses)' };
+}
+function displayToMass(val, type) {
+  if (STELLAR_TYPES.has(type)) return val * M_SUN;
+  return                              val * M_EARTH;
+}
+
 export class UI {
   constructor(canvas, camera, bodies, physics, renderer, onUpdate) {
     this.canvas   = canvas;
@@ -262,6 +278,158 @@ export class UI {
     }, { passive: false });
 
     this.canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    // ── Touch events ──────────────────────────────────────
+    // Map single-finger touch → mouse-style drag (pan + vel arrow)
+    // Map pinch (two-finger) → zoom
+    this._bindTouch();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // TOUCH SUPPORT
+  // Single finger: pan (on empty) or vel-arrow (on body)
+  // Two fingers:   pinch-to-zoom
+  // ─────────────────────────────────────────────────────────
+  _bindTouch() {
+    const canvas = this.canvas;
+
+    // Track second-touch distance for pinch
+    let _pinchDist = null;
+
+    const getTouchPos = (touch) => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+    };
+
+    const pinchDistance = (touches) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx*dx + dy*dy);
+    };
+
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+
+      if (e.touches.length === 2) {
+        // Entering pinch mode — cancel any ongoing drag
+        this._dragMode = 'none';
+        this.velArrow  = null;
+        _pinchDist = pinchDistance(e.touches);
+        return;
+      }
+
+      if (e.touches.length !== 1) return;
+      const pos   = getTouchPos(e.touches[0]);
+      const world = this.camera.screenToWorld(pos.x, pos.y, canvas);
+      const hit   = this._hitTest(world.x, world.y);
+
+      if (hit) {
+        this.select(hit.id);
+        this._hideTooltip();
+        this._dragMode   = 'pending-body';
+        this._dragBodyId = hit.id;
+        this._dragStart  = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        this._dragBodyOffset = { x: world.x - hit.x, y: world.y - hit.y };
+      } else {
+        this.deselect();
+        this._hideHint();
+        this._dragMode   = 'pan';
+        this._panStart   = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        this._camAtStart = { x: this.camera.x, y: this.camera.y };
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+
+      // ── Pinch-to-zoom ────────────────────────────────────
+      if (e.touches.length === 2 && _pinchDist !== null) {
+        const newDist = pinchDistance(e.touches);
+        const factor  = newDist / _pinchDist;
+        // Zoom around midpoint of the two fingers
+        const rect  = canvas.getBoundingClientRect();
+        const midX  = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
+        const midY  = ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
+        this.camera.zoomAt(midX, midY, factor, canvas);
+        _pinchDist = newDist;
+        return;
+      }
+
+      if (e.touches.length !== 1) return;
+      const t  = e.touches[0];
+      const pos = getTouchPos(t);
+
+      // Promote pending-body to a mode after 8px threshold
+      if (this._dragMode === 'pending-body') {
+        const dx = t.clientX - this._dragStart.x;
+        const dy = t.clientY - this._dragStart.y;
+        if (Math.sqrt(dx*dx + dy*dy) > 8) {
+          // On touch, default to vel arrow (no Alt key on mobile)
+          this._dragMode = 'vel';
+          this._velCommitted = false;
+          this._hideHint();
+        }
+      }
+
+      if (this._dragMode === 'pan') {
+        const dx = t.clientX - this._panStart.x;
+        const dy = t.clientY - this._panStart.y;
+        this.camera.x = this._camAtStart.x - dx / this.camera.zoom;
+        this.camera.y = this._camAtStart.y - dy / this.camera.zoom;
+        return;
+      }
+
+      if (this._dragMode === 'vel') {
+        const body = this.bodies.find(b => b.id === this._dragBodyId);
+        if (body) {
+          this.velArrow = { fromWorld: { x: body.x, y: body.y }, toScreen: { x: pos.x, y: pos.y } };
+          const vel = this._arrowToVelocity(body, pos.x, pos.y);
+          this._previewVelocity(vel.vx, vel.vy);
+        }
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      _pinchDist = null;
+
+      const prevMode = this._dragMode;
+      this._dragMode = 'none';
+
+      if (prevMode === 'vel') {
+        // Find last touch (changedTouches has the lifted finger)
+        const t   = e.changedTouches[0];
+        const pos = getTouchPos(t);
+        const body = this.bodies.find(b => b.id === this._dragBodyId);
+        if (body) {
+          const vel = this._arrowToVelocity(body, pos.x, pos.y);
+          const ws  = this.camera.worldToScreen(body.x, body.y, canvas);
+          const len = Math.sqrt((pos.x-ws.x)**2 + (pos.y-ws.y)**2);
+          if (len > 5) {
+            body.vx = vel.vx;
+            body.vy = vel.vy;
+            body.clearTrail();
+            this.physics.markDirty();
+            this._updatePropsPanel(body);
+          }
+        }
+        this.velArrow    = null;
+        this._dragBodyId = null;
+        this._hideHint();
+      }
+    }, { passive: false });
+
+    // Palette items: tap to place at canvas center (mobile-friendly alternative to drag)
+    document.querySelectorAll('.palette-item:not(.locked)').forEach(item => {
+      item.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const type  = item.dataset.type;
+        const rect  = canvas.getBoundingClientRect();
+        const world = this.camera.screenToWorld(rect.width / 2, rect.height / 2, canvas);
+        this._placeBody(type, world.x, world.y);
+        this._showHint();
+      }, { passive: false });
+    });
   }
 
   // ─────────────────────────────────────────────────────────
@@ -344,7 +512,8 @@ export class UI {
   // ─────────────────────────────────────────────────────────
   _showTooltip(body, cx, cy) {
     this._tooltipBody = body.id;
-    const massStr = body.mass >= 1e6 ? (body.mass/1e6).toFixed(2)+' M☉' : body.mass.toFixed(1)+' M⊕';
+    const { val: mVal, unit: mUnit } = massToDisplay(body);
+    const massStr = mVal.toFixed(3) + ' ' + mUnit.split(' ')[0];
     this._tooltipEl.innerHTML =
       `<strong style="color:${body.color}">${body.name}</strong><br>` +
       `Type: ${body.type}<br>Mass: ${massStr}<br>Speed: ${body.speedKms.toFixed(1)} km/s`;
@@ -385,7 +554,10 @@ export class UI {
   _updatePropsPanel(body) {
     document.getElementById('props-type-label').textContent = body.type.toUpperCase();
     document.getElementById('prop-name').value   = body.name;
-    document.getElementById('prop-mass').value   = (body.mass / 1e6).toFixed(4);
+    const md = massToDisplay(body);
+    document.getElementById('prop-mass').value = md.val.toFixed(4);
+    const massUnitEl = document.getElementById('mass-unit-label');
+    if (massUnitEl) massUnitEl.textContent = md.unit;
     document.getElementById('prop-radius').value = body.radius.toFixed(2);
     document.getElementById('prop-color').value  = body.color;
     document.getElementById('prop-color-hex').textContent = body.color;
@@ -429,7 +601,11 @@ export class UI {
     };
 
     document.getElementById('prop-name').addEventListener('input', e => { const b = getBody(); if (b) b.name = e.target.value; });
-    document.getElementById('prop-mass').addEventListener('input', e => { const b = getBody(); if (b) b.mass = parseFloat(e.target.value)*1e6 || b.mass; });
+    document.getElementById('prop-mass').addEventListener('input', e => {
+      const b = getBody(); if (!b) return;
+      const val = parseFloat(e.target.value);
+      if (!isNaN(val) && val > 0) b.mass = displayToMass(val, b.type);
+    });
     document.getElementById('prop-radius').addEventListener('input', e => {
       const b = getBody(); if (!b) return;
       const val = parseFloat(e.target.value);

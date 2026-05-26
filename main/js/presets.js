@@ -1,7 +1,7 @@
-// presets.js — built-in scenarios, all velocities recalculated for G=1.9844e-5
+// presets.js — built-in scenarios, all velocities recalculated for G=1.9855e-5
 //
 // Formula: circular orbit v = sqrt(G * M_central / r)
-// G = 1.9844e-5  AU³ yr⁻² (1e24 kg)⁻¹
+// G = 1.9855e-5  AU³ yr⁻² (1e24 kg)⁻¹  ← canonical value from Body.js SIM.G
 // Earth mass = 6 units, Sun mass = 1,989,000 units
 // 1 AU/yr = 4.740 km/s  (corrected: AU_km/yr_s = 1.496e8/3.156e7)
 
@@ -55,7 +55,7 @@ export const PRESETS = [
     name: 'Figure-8 Orbit',
     desc: 'Chenciner–Montgomery solution (2000). Three equal masses trace a figure-8 forever.',
     bodies: 3,
-    // Scaled from normalized Chenciner-Montgomery with M=300000, G=1.9844e-5
+    // Scaled from normalized Chenciner-Montgomery with M=300000, G=1.9855e-5
     // scale = sqrt(G*M) = 2.4399
     // Normalized positions (Simo 2002): (-1,0),(1,0),(0,0)  at t=0
     // Normalized velocities: (0.3069,-0.1255) for body1, (0.3069,-0.1255) for body2, (-0.6138,0.2510) for body3
@@ -86,7 +86,7 @@ export const PRESETS = [
     desc: 'A small body approaches a massive star and is flung away — gravitational assist.',
     bodies: 2,
     // Traveller starts at (-8,3), moving roughly toward star
-    // escape velocity at r=sqrt(64+9)=8.54 is sqrt(2GM/r)=sqrt(2*1.9844e-5*1989000/8.54)=3.03
+    // escape velocity at r=sqrt(64+9)=8.54 is sqrt(2GM/r)=sqrt(2*1.9855e-5*1989000/8.54)=3.03
     // Give it v < escape but at an angle to create hyperbolic flyby
     bodies_data: [
       { type:'star',   x:0,  y:0, vx:0,   vy:0,    mass:1989000, radius:0.25,   color:'#FFD060', name:'Massive Star' },
@@ -100,7 +100,7 @@ export const PRESETS = [
     desc: 'Two star clusters on a collision course. Watch them pass through and merge.',
     bodies: 14,
     bodies_data: (() => {
-      const G = 1.9844e-5;
+      const G = 1.9855e-5;  // matches SIM.G in Body.js
       const result = [];
       const Mcore = 5000000;
       // Left cluster moving right
@@ -170,8 +170,8 @@ export const PRESETS = [
     bodies: 3,
     bodies_data: [
       { type:'pulsar',    x:0,   y:0,  vx:0,    vy:0,     mass:2785000,  radius:0.04, physicsRadius:0.02,  color:'#80FFCC', name:'PSR-1'  },
-      { type:'planet',    x:0.8, y:0,  vx:0,    vy:9.96,  mass:6,        radius:0.08, physicsRadius:0.015, color:'#FF6060', name:'Scorch' },
-      { type:'planet',    x:2.0, y:0,  vx:0,    vy:6.28,  mass:20,       radius:0.10, physicsRadius:0.018, color:'#8080FF', name:'Tide'   },
+      { type:'planet',    x:0.8, y:0,  vx:0,    vy:8.314, mass:6,        radius:0.08, physicsRadius:0.015, color:'#FF6060', name:'Scorch' },
+      { type:'planet',    x:2.0, y:0,  vx:0,    vy:5.258, mass:20,       radius:0.10, physicsRadius:0.018, color:'#8080FF', name:'Tide'   },
     ]
   },
 
@@ -181,12 +181,14 @@ export const PRESETS = [
     desc: 'A star with a swarm of comets on highly elliptic orbits. Watch the comas ignite at perihelion.',
     bodies: 6,
     bodies_data: [
-      { type:'star',  x:0,     y:0,   vx:0,    vy:0,     mass:1989000, radius:0.25, physicsRadius:0.08,  color:'#FFD060', name:'Sol'    },
-      { type:'comet', x:0.6,   y:0,   vx:0,    vy:14.5,  mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#C8E8FF', name:'C/1'    },
-      { type:'comet', x:0.8,   y:0.3, vx:-3.0, vy:12.0,  mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#A0D4FF', name:'C/2'    },
-      { type:'comet', x:-1.0,  y:0.5, vx:2.5,  vy:-10.5, mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#80C8FF', name:'C/3'    },
-      { type:'comet', x:0.5,  y:-0.8, vx:4.0,  vy:11.0,  mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#B0DCFF', name:'C/4'    },
-      { type:'comet', x:-0.7,  y:-0.4,vx:3.5,  vy:-12.5, mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#90D0FF', name:'C/5'    },
+      { type:'star',  x:0,     y:0,   vx:0,    vy:0,      mass:1989000, radius:0.25, physicsRadius:0.08,  color:'#FFD060', name:'Sol'    },
+      // Comets on bound elliptic orbits: v = sqrt(G*M*(2/r - 1/a)) < v_escape
+      // Positioned at perihelion, velocity is tangential (perpendicular to radial)
+      { type:'comet', x:0.6,   y:0,   vx:0,    vy:11.0,   mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#C8E8FF', name:'C/1'    },
+      { type:'comet', x:0.8,   y:0,   vx:0,    vy:9.6,    mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#A0D4FF', name:'C/2'    },
+      { type:'comet', x:-1.0,  y:0,   vx:0,    vy:-8.5,   mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#80C8FF', name:'C/3'    },
+      { type:'comet', x:0,     y:0.7, vx:-10.3,vy:0,      mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#B0DCFF', name:'C/4'    },
+      { type:'comet', x:0,    y:-0.5, vx:12.0, vy:0,      mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#90D0FF', name:'C/5'    },
     ]
   },
 

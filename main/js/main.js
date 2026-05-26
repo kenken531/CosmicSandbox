@@ -36,6 +36,26 @@ const ui = new UI(canvas, camera, bodies, physics, renderer, () => {
 // ── Sim Settings Panel ────────────────────────────────────
 _bindSimPanel();
 
+// ── URL ?scene= parameter ─────────────────────────────────
+// Load a preset directly from the URL, e.g. ?scene=solar-system
+// Must run after UI is fully wired so _loadPreset works.
+(function _loadSceneParam() {
+  const params   = new URLSearchParams(window.location.search);
+  const sceneId  = params.get('scene');
+  if (!sceneId) return;
+  // Import PRESETS lazily — ui already imports it, but we need it here too
+  import('./presets.js').then(({ PRESETS }) => {
+    const preset = PRESETS.find(p => p.id === sceneId);
+    if (preset) {
+      ui._loadPreset(preset);
+      // Auto-play when loaded from URL
+      if (!physics.running) ui.togglePlay();
+    } else {
+      console.warn(`[Cosmic Playground] Unknown scene id: "${sceneId}"`);
+    }
+  });
+})();
+
 // ── FPS ──────────────────────────────────────────────────
 let lastTime = 0, fps = 60;
 const FPS_SMOOTH = 0.92;
