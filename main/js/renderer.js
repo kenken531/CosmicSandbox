@@ -136,8 +136,11 @@ export class Renderer {
   // ── Live orbital trails (ring buffer, fades) ────────────
   _drawTrails(bodies, camera) {
     const ctx = this.ctx;
-    // FIX: batch trail into 4 opacity bands instead of O(n) individual draw calls
     const BANDS = 4;
+    // Jump threshold: consecutive world points > 2 AU apart = ring-buffer wrap
+    // Break the path there to avoid the diagonal "teleport" line artifact
+    const JUMP_SQ = 4.0;
+
     for (const b of bodies) {
       const trail = b.getTrail();
       if (trail.length < 3) continue;
@@ -148,12 +151,27 @@ export class Renderer {
       const segs = trail.length - 1;
 
       for (let band = 0; band < BANDS; band++) {
-        const t0 = band / BANDS, t1 = (band + 1) / BANDS;
-        const alpha = (t1 * t1) * 0.55;   // quadratic — newest band brightest
+        const t0    = band / BANDS, t1 = (band + 1) / BANDS;
+        const alpha = (t1 * t1) * 0.55;
         const lw    = band < 2 ? 0.5 : 1.0;
+
+        const iStart = Math.floor(t0 * segs);
+        const iEnd   = Math.min(segs, Math.ceil(t1 * segs));
+
         ctx.beginPath();
         let started = false;
-        for (let i = Math.floor(t0 * segs); i < segs && i <= Math.ceil(t1 * segs); i++) {
+        for (let i = iStart; i < iEnd; i++) {
+          const wdx = trail[i+1].x - trail[i].x;
+          const wdy = trail[i+1].y - trail[i].y;
+          if (wdx*wdx + wdy*wdy > JUMP_SQ) {
+            // Ring wrapped — commit sub-path and restart
+            ctx.strokeStyle = `rgba(${r},${g},${bl},${alpha})`;
+            ctx.lineWidth   = lw;
+            ctx.stroke();
+            ctx.beginPath();
+            started = false;
+            continue;
+          }
           const p1 = camera.worldToScreen(trail[i].x,   trail[i].y,   this.canvas);
           const p2 = camera.worldToScreen(trail[i+1].x, trail[i+1].y, this.canvas);
           if (!started) { ctx.moveTo(p1.x, p1.y); started = true; }
@@ -479,9 +497,8 @@ export class Renderer {
 
     const angle = Math.atan2(dy, dx);
     // Convert arrow pixels → AU/yr — MUST match ui.js _arrowToVelocity formula:
-    // ui.js: velocity = (screen_delta / zoom) * SENSITIVITY  where SENSITIVITY=10
-    // Old renderer used scale=100*zoom which was 1000x smaller than committed velocity
-    const SENSITIVITY = 10;
+    // ui.js: velocity = (screen_delta / zoom) * SENSITIVITY  where SENSITIVITY=2.5
+    const SENSITIVITY = 2.5;
     const speedAUyr = (len / camera.zoom) * SENSITIVITY;
     const speedKms  = speedAUyr * SIM.velUnit;
 
@@ -556,13 +573,100 @@ export class Renderer {
       }
     }
 
-    // ── Arrow shaft ───────────────────────────────────────
+    // ── Predicted path trace (fix #9) ─────────────────────
+    // Run a lightweight Euler forward-integration to sketch where the body will go.
+    // Uses only the dominant attractor for speed; good enough for a visual guide.
+    if (attractor && len >= 4) {
+      const body = bodies.find(b => b.id === selectedId);
+      if (body) {
+        // Reconstruct velocity from arrow direction + snapped speed
+        let traceVx, traceVy;
+        if (velArrow._snapped && attractor) {
+          const dx2 = body.x - attractor.x, dy2 = body.y - attractor.y;
+          const r2   = Math.sqrt(dx2*dx2 + dy2*dy2);
+          const v_circ = Math.sqrt(G * attractor.mass / r2);
+          const perpCCW = { x: -dy2/r2, y: dx2/r2 };
+          const perpCW  = { x:  dy2/r2, y: -dx2/r2 };
+          const rawVx = (toScreen.x - sp.x) / camera.zoom * SENSITIVITY;
+          const rawVy = (toScreen.y - sp.y) / camera.zoom * SENSITIVITY;
+          const dot   = rawVx * perpCCW.x + rawVy * perpCCW.y;
+          const perp  = dot >= 0 ? perpCCW : perpCW;
+          traceVx = perp.x * v_circ; traceVy = perp.y * v_circ;
+        } else {
+          traceVx = (toScreen.x - sp.x) / camera.zoom * SENSITIVITY;
+          traceVy = (toScreen.y - sp.y) / camera.zoom * SENSITIVITY;
+        }
+
+        // Trace up to 300 steps of dt=0.008 yr each (≈2.4 yr lookahead)
+        const traceDt  = 0.008;
+        const traceMax = 300;
+        let tx = body.x, ty = body.y, tvx = traceVx, tvy = traceVy;
+
+        const pts = [];
+        pts.push(camera.worldToScreen(tx, ty, this.canvas));
+
+        for (let t = 0; t < traceMax; t++) {
+          const adx = attractor.x - tx, ady = attractor.y - ty;
+          const ar2 = adx*adx + ady*ady + 0.0025; // tiny softening
+          const ar3 = ar2 * Math.sqrt(ar2);
+          const ax  = G * attractor.mass * adx / ar3;
+          const ay  = G * attractor.mass * ady / ar3;
+          tvx += ax * traceDt;
+          tvy += ay * traceDt;
+          tx  += tvx * traceDt;
+          ty  += tvy * traceDt;
+          pts.push(camera.worldToScreen(tx, ty, this.canvas));
+          // Stop if we've gone very far or looped back close to start
+          if (t > 20) {
+            const dsx = pts[pts.length-1].x - pts[0].x;
+            const dsy = pts[pts.length-1].y - pts[0].y;
+            if (dsx*dsx + dsy*dsy < 100 && t > 60) break; // ~10px close = loop closed
+          }
+          // Stop if offscreen by a lot
+          const p = pts[pts.length-1];
+          if (p.x < -400 || p.x > this.canvas.width+400 ||
+              p.y < -400 || p.y > this.canvas.height+400) break;
+        }
+
+        if (pts.length > 2) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+          const traceColor = velArrow._snapped ? 'rgba(80,255,160,0.55)'
+                           : speedAUyr > (attractor ? Math.sqrt(G*attractor.mass / Math.sqrt(
+                                 (body.x-attractor.x)**2+(body.y-attractor.y)**2
+                               )) * Math.sqrt(2) : Infinity)
+                             ? 'rgba(255,120,60,0.45)'
+                             : 'rgba(80,210,255,0.35)';
+          ctx.strokeStyle = traceColor;
+          ctx.lineWidth   = 1.5;
+          ctx.setLineDash([3, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.restore();
+        }
+      }
+    }
+
+    // ── Snap indicator (fix #7) ───────────────────────────
+    if (velArrow._snapped) {
+      ctx.save();
+      ctx.font      = '700 9px "Orbitron", monospace';
+      ctx.fillStyle = 'rgba(80,255,160,0.95)';
+      ctx.textAlign = 'center';
+      ctx.fillText('⊙ CIRCULAR LOCK', sp.x, sp.y - 18);
+      ctx.restore();
+    }
+
+    const arrowColor = velArrow._snapped ? 'rgba(80,255,160,0.92)' : 'rgba(80,210,255,0.92)';
+    const arrowGlow  = velArrow._snapped ? 'rgba(80,255,160,0.5)'  : 'rgba(80,210,255,0.5)';
     ctx.save();
-    ctx.strokeStyle = 'rgba(80,210,255,0.92)';
-    ctx.fillStyle   = 'rgba(80,210,255,0.92)';
-    ctx.lineWidth   = 2;
-    ctx.shadowColor = 'rgba(80,210,255,0.5)';
-    ctx.shadowBlur  = 8;
+    ctx.strokeStyle = arrowColor;
+    ctx.fillStyle   = arrowColor;
+    ctx.lineWidth   = velArrow._snapped ? 2.5 : 2;
+    ctx.shadowColor = arrowGlow;
+    ctx.shadowBlur  = velArrow._snapped ? 14 : 8;
 
     // Dashed shaft
     ctx.setLineDash([6, 4]);
@@ -604,12 +708,12 @@ export class Renderer {
     ctx.fill();
 
     ctx.font      = '700 10px "Orbitron", monospace';
-    ctx.fillStyle = 'rgba(160,230,255,0.98)';
+    ctx.fillStyle = velArrow._snapped ? 'rgba(80,255,160,0.98)' : 'rgba(160,230,255,0.98)';
     ctx.textAlign = 'left';
     ctx.fillText(speedKms.toFixed(1) + ' km/s', lx, ly);
 
     ctx.font      = '9px "Space Mono", monospace';
-    ctx.fillStyle = 'rgba(100,180,220,0.7)';
+    ctx.fillStyle = velArrow._snapped ? 'rgba(80,220,140,0.8)' : 'rgba(100,180,220,0.7)';
     ctx.fillText(speedAUyr.toFixed(3) + ' AU/yr', lx, ly + 13);
 
     ctx.restore();

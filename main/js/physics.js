@@ -13,9 +13,10 @@ import { SIM } from './bodies/Body.js';
 export class Physics {
   constructor() {
     this.G             = SIM.G;      // 1.9855e-5 AU³ yr⁻² (1e24 kg)⁻¹ (corrected)
-    this.softening     = 0.3;         // ε (AU) — prevents singularity
-    // BUG3 FIX: 0.05 was too small → accel spike of 263 AU/yr per frame at close approach
-    // 0.3 caps max accel at ~439 AU/yr² → 7 AU/yr per frame → no unphysical rebound
+    this.softening     = 0.05;        // ε (AU) — prevents singularity
+    // Reduced from 0.3: large softening biases gravity at orbital distances (~1 AU),
+    // causing slow artificial precession and drift. 0.05 is negligible at ≥0.5 AU.
+    // Close-approach singularities are handled by adaptive micro-stepping instead.
     this.timeScale     = 1.0;
     this.running       = false;
     this.collisionMode = 'merge';    // 'merge' | 'passthrough'
@@ -89,11 +90,18 @@ export class Physics {
         if (d < minDist) minDist = d;
       }
     }
-    // If very close, micro-step: split dt into up to 8 mini-steps
+    // Adaptive micro-substeps:
+    // 1. If bodies are dangerously close, split more finely (close-approach guard)
+    // 2. Always add substeps proportional to timeScale so orbital accuracy is preserved
+    //    at high sim speeds. Target: dt_effective < P_min/20 where P_min is the period
+    //    of the tightest pair. Floor is 1, no hardcoded cap of 8.
     const closeThreshold = this.softening * 4;
-    const microSteps = minDist < closeThreshold
-      ? Math.min(8, Math.ceil(closeThreshold / Math.max(minDist, 0.001)))
+    const closeSubsteps  = minDist < closeThreshold
+      ? Math.ceil(closeThreshold / Math.max(minDist, 0.001))
       : 1;
+    // Speed substeps: scale so each substep ≤ baseDt × 2 regardless of timeScale
+    const speedSubsteps = Math.max(1, Math.ceil(this.timeScale / 2));
+    const microSteps = Math.min(200, Math.max(closeSubsteps, speedSubsteps));
     const microDt = dt / microSteps;
 
     for (let ms = 0; ms < microSteps; ms++) {
