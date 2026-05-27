@@ -194,7 +194,11 @@ export class UI {
 
       if (prevMode === 'pan' || prevMode === 'pending-body') {
         container.classList.remove('panning');
-        // pending-body with no drag = pure click, already handled by mousedown select
+        // pending-body with no drag = pure click → now open props panel
+        if (prevMode === 'pending-body' && this._dragBodyId !== null) {
+          const body = this.bodies.find(b => b.id === this._dragBodyId);
+          if (body) this._openPropsPanel(body);
+        }
         return;
       }
 
@@ -246,13 +250,14 @@ export class UI {
         const hit   = this._hitTest(world.x, world.y);
 
         if (hit) {
-          // Select the body, then enter pending-body mode to await drag
-          this.select(hit.id);
+          // Only highlight selection visually on mousedown — defer opening props panel
+          // until mouseup (pure click). This prevents the panel from opening and shifting
+          // the canvas during a velocity-arrow drag.
+          this.selectedId = hit.id;
           this._hideTooltip();
           this._dragMode   = 'pending-body';
           this._dragBodyId = hit.id;
           this._dragStart  = { x: e.clientX, y: e.clientY };
-          // Pre-compute body-move offset (used if Alt held)
           this._dragBodyOffset = {
             x: world.x - hit.x,
             y: world.y - hit.y,
@@ -438,15 +443,54 @@ export class UI {
   // ─────────────────────────────────────────────────────────
   _arrowToVelocity(body, sx, sy) {
     const ws = this.camera.worldToScreen(body.x, body.y, this.canvas);
-    // BUG2 FIX: convert screen delta → world delta → velocity
+    // Convert screen delta → world delta → velocity
     // world_delta (AU) = screen_delta_px / zoom
     // velocity (AU/yr) = world_delta × SENSITIVITY
-    // SENSITIVITY=10: drag 1 AU of screen distance = 10 AU/yr
-    // This is zoom-invariant in feel: same physical drag distance = same velocity
-    const SENSITIVITY = 10;
+    // SENSITIVITY=2.5: at default zoom=40 px/AU, a 100px drag = 2.5 AU/yr × (100/40) = 6.25 AU/yr
+    // = 29.6 km/s ≈ Earth orbital speed. Feels natural.
+    // (Old value was 10 — 4× too fast)
+    const SENSITIVITY = 2.5;
     const worldDx = (sx - ws.x) / this.camera.zoom;
     const worldDy = (sy - ws.y) / this.camera.zoom;
-    return { vx: worldDx * SENSITIVITY, vy: worldDy * SENSITIVITY };
+    let vx = worldDx * SENSITIVITY;
+    let vy = worldDy * SENSITIVITY;
+
+    // ── Circular orbit snap (fix #7) ──────────────────────
+    // Find the most massive other body (attractor)
+    const G = 1.9855e-5;  // SIM.G
+    let attractor = null;
+    for (const b of this.bodies) {
+      if (b.id === body.id) continue;
+      if (!attractor || b.mass > attractor.mass) attractor = b;
+    }
+    if (attractor) {
+      const dx = body.x - attractor.x;
+      const dy = body.y - attractor.y;
+      const r  = Math.sqrt(dx*dx + dy*dy);
+      if (r > 0.001) {
+        const v_circ = Math.sqrt(G * attractor.mass / r);
+        const v_curr = Math.sqrt(vx*vx + vy*vy);
+        const snapZone = 0.05; // 5% tolerance
+        if (Math.abs(v_curr - v_circ) / v_circ < snapZone) {
+          // Snap speed to exactly v_circ, keep direction perpendicular to radius
+          // Perpendicular direction (90° CCW from radius)
+          const rx = dx / r, ry = dy / r;
+          // Determine which perpendicular matches user's drag direction
+          const perpCCW = { x: -ry, y:  rx };
+          const perpCW  = { x:  ry, y: -rx };
+          const dot     = vx * perpCCW.x + vy * perpCCW.y;
+          const perp    = dot >= 0 ? perpCCW : perpCW;
+          vx = perp.x * v_circ;
+          vy = perp.y * v_circ;
+          // Signal to renderer that we're snapped
+          if (this.velArrow) this.velArrow._snapped = true;
+        } else {
+          if (this.velArrow) this.velArrow._snapped = false;
+        }
+      }
+    }
+
+    return { vx, vy };
   }
 
   _previewVelocity(vx, vy) {
@@ -546,10 +590,19 @@ export class UI {
     document.getElementById('props-panel').classList.remove('hidden');
     document.body.classList.add('props-open');
     this._updatePropsPanel(body);
+    // Resize canvas after CSS transition so coordinate math stays correct
+    requestAnimationFrame(() => {
+      const c = this.canvas.parentElement;
+      this.renderer.resize(c.clientWidth, c.clientHeight);
+    });
   }
   _closePropsPanel() {
     document.getElementById('props-panel').classList.add('hidden');
     document.body.classList.remove('props-open');
+    requestAnimationFrame(() => {
+      const c = this.canvas.parentElement;
+      this.renderer.resize(c.clientWidth, c.clientHeight);
+    });
   }
   _updatePropsPanel(body) {
     document.getElementById('props-type-label').textContent = body.type.toUpperCase();
@@ -839,23 +892,33 @@ export class UI {
       yrs < 1 ? (yrs*365.25).toFixed(1)+' d' : yrs < 100 ? yrs.toFixed(1)+' yr' : (yrs/1000).toFixed(2)+' kyr';
 
     if (this.bodies.length > 1 && phys._initEnergy !== null) {
+      // Smooth energy values with EMA so they don't flicker unreadably
+      const EMA = 0.05; // blending factor — smaller = smoother
+      if (this._hudKE  === undefined) this._hudKE  = phys.kineticEnergy;
+      if (this._hudTE  === undefined) this._hudTE  = phys.totalEnergy;
+      if (this._hudDrift === undefined) this._hudDrift = phys.energyDrift;
+      this._hudKE    = this._hudKE    * (1-EMA) + phys.kineticEnergy   * EMA;
+      this._hudTE    = this._hudTE    * (1-EMA) + phys.totalEnergy     * EMA;
+      this._hudDrift = this._hudDrift * (1-EMA) + phys.energyDrift     * EMA;
+
       const fmt = v => { const a=Math.abs(v); return a>=1e9?(v/1e9).toFixed(2)+' G':a>=1e6?(v/1e6).toFixed(2)+' M':a>=1e3?(v/1e3).toFixed(2)+' k':v.toFixed(2); };
-      document.getElementById('hud-ke').textContent = fmt(phys.kineticEnergy);
-      document.getElementById('hud-te').textContent = fmt(phys.totalEnergy);
-      const drift   = phys.energyDrift;
+      document.getElementById('hud-ke').textContent = fmt(this._hudKE);
+      document.getElementById('hud-te').textContent = fmt(this._hudTE);
+      const drift   = this._hudDrift;
       const driftEl = document.getElementById('hud-drift');
       driftEl.textContent  = drift.toFixed(3)+'%';
       driftEl.dataset.good = Math.abs(drift) < 0.1 ? 'true' : 'false';
       const seKe = document.getElementById('se-ke');
       if (seKe) {
-        document.getElementById('se-ke').textContent = fmt(phys.kineticEnergy);
+        document.getElementById('se-ke').textContent = fmt(this._hudKE);
         document.getElementById('se-pe').textContent = fmt(phys.potentialEnergy);
-        document.getElementById('se-te').textContent = fmt(phys.totalEnergy);
+        document.getElementById('se-te').textContent = fmt(this._hudTE);
         const sdEl = document.getElementById('se-drift');
         sdEl.textContent = drift.toFixed(4)+'%';
         sdEl.style.color = Math.abs(drift)<0.1 ? '#4ade80' : Math.abs(drift)<1 ? '#facc15' : '#f87171';
       }
     } else {
+      this._hudKE = undefined; this._hudTE = undefined; this._hudDrift = undefined;
       ['hud-ke','hud-te','hud-drift'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='—'; });
     }
 

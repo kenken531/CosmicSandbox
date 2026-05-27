@@ -85,7 +85,6 @@ export class Minimap {
     }
 
     // Draw viewport rectangle
-    // Main canvas world corners → minimap pixels
     const topLeft     = camera.screenToWorld(0, 0, mainCanvas);
     const bottomRight = camera.screenToWorld(mainCanvas.width, mainCanvas.height, mainCanvas);
 
@@ -95,5 +94,32 @@ export class Minimap {
     ctx.strokeStyle = 'rgba(91,142,255,0.5)';
     ctx.lineWidth   = 1;
     ctx.strokeRect(vpTL.x, vpTL.y, vpBR.x - vpTL.x, vpBR.y - vpTL.y);
+
+    // ── Scale bar ────────────────────────────────────────
+    // Choose a round-number distance that fits nicely in the minimap
+    // Pick the largest of: 0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 250 AU
+    // that maps to between 15 and 55 minimap pixels.
+    const NICE = [0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000];
+    let barAU = NICE[0];
+    for (const v of NICE) {
+      const px = v * scale;
+      if (px >= 15 && px <= 55) barAU = v;
+    }
+    const barPx = barAU * scale;
+    const barLabel = barAU >= 1 ? barAU.toFixed(0) + ' AU' : barAU + ' AU';
+
+    const bx = offX;
+    const by = offY + (rangeY * scale) + 6;  // just below the mapped world extent
+
+    ctx.fillStyle    = 'rgba(91,142,255,0.85)';
+    ctx.fillRect(bx, by, barPx, 2);
+    // End ticks
+    ctx.fillRect(bx,          by - 3, 1.5, 8);
+    ctx.fillRect(bx + barPx - 1.5, by - 3, 1.5, 8);
+
+    ctx.font      = '8px "Space Mono", monospace';
+    ctx.fillStyle = 'rgba(150,180,255,0.8)';
+    ctx.textAlign = 'left';
+    ctx.fillText(barLabel, bx, by + 12);
   }
 }
