@@ -161,7 +161,7 @@
     <div class="instructions">
       <div class="instr-row"><kbd>Drag</kbd> place object</div>
       <div class="instr-row"><kbd>Click</kbd> select body</div>
-      <div class="instr-row"><kbd>Drag body</kbd> set velocity</div>
+      <div class="instr-row"><kbd>Drag+release</kbd> set velocity</div>
       <div class="instr-row"><kbd>Alt+drag</kbd> move body</div>
       <div class="instr-row"><kbd>Hover</kbd> quick info</div>
       <div class="instr-row"><kbd>L-drag</kbd> pan view</div>
@@ -209,7 +209,7 @@
       </div>
       <div class="prop-group">
         <label>SOFTENING ε <span class="prop-unit">AU</span></label>
-        <input type="range" id="sim-eps" min="0.05"  max="1.0" step="0.01"  value="0.3">
+        <input type="range" id="sim-eps" min="0.01" max="1.0" step="0.01" value="0.05">
         <span id="sim-eps-val">0.300 AU</span>
       </div>
       <div class="prop-group">
@@ -229,6 +229,7 @@
         <div class="energy-row"><span>Potential Energy</span><span id="se-pe">—</span></div>
         <div class="energy-row"><span>Total Energy</span><span id="se-te">—</span></div>
         <div class="energy-row drift-row"><span>Energy Drift</span><span id="se-drift">—</span></div>
+        <div class="energy-row"><span>Substeps/Frame</span><span id="se-substeps">—</span></div>
       </div>
       <button class="tool-btn" id="sim-reset-energy" style="width:100%;justify-content:center;margin-top:4px">RESET ENERGY BASELINE</button>
     </div>
@@ -269,7 +270,7 @@
       </div>
       <div class="prop-group">
         <label>SIZE <span class="prop-unit">AU display radius</span></label>
-        <input type="number" id="prop-radius" class="prop-input" min="100" step="100" value="6371">
+        <input type="number" id="prop-radius" class="prop-input" min="0.01" max="50" step="0.01" value="0.08">
       </div>
       <div class="prop-group">
         <label>SPEED <span class="prop-unit">km/s</span></label>
@@ -291,7 +292,7 @@
       <!-- vel-arrow hint shown after body spawn -->
       <div id="vel-arrow-hint" class="vel-hint hidden">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 6h8M7 3l3 3-3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Drag from body to set velocity
+        Drag from body, then release to set orbit velocity
       </div>
       <div class="prop-group">
         <label>COLOR</label>
@@ -305,8 +306,13 @@
     <div class="props-stats">
       <div class="stat-row"><span class="stat-label">SPEED</span><span class="stat-val" id="stat-speed">0 km/s</span></div>
       <div class="stat-row"><span class="stat-label">DIST TO ORIGIN</span><span class="stat-val" id="stat-dist">0 AU</span></div>
+      <div class="stat-row density-row"><span class="stat-label">DENSITY</span><span class="stat-val" id="stat-density">—</span></div>
+      <div class="stat-row"><span class="stat-label">CLASS CHECK</span><span class="stat-val" id="stat-classify">—</span></div>
     </div>
   </aside>
+
+  <!-- RECLASSIFICATION TOAST -->
+  <div id="reclassify-toast" class="reclassify-toast" aria-live="polite"></div>
 
   <script type="module" src="js/main.js"></script>
 </body>
