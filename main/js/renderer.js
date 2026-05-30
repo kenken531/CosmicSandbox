@@ -1,5 +1,5 @@
 // renderer.js — Canvas 2D rendering: starfield, trails, glows, bodies, overlays
-import { SIM } from './bodies/Body.js';
+import { SIM, hexRgb } from './bodies/Body.js';
 
 export class Renderer {
   constructor(canvas) {
@@ -83,7 +83,7 @@ export class Renderer {
   }
 
   // ── Main render pipeline ────────────────────────────────
-  render(bodies, camera, selectedId, velArrow) {
+  render(bodies, camera, selectedId, velArrow, physics) {
     const ctx = this.ctx;
 
     this._selectionAngle += 0.012;
@@ -104,27 +104,43 @@ export class Renderer {
     for (const b of bodies) this._drawBody(b, camera, b.id === selectedId);
 
     // 6. Velocity arrow + orbit preview ring
-    if (velArrow) this._drawVelArrow(velArrow, camera, bodies, selectedId);
+    if (velArrow) this._drawVelArrow(velArrow, camera, bodies, selectedId, physics);
   }
 
   // ── Permanent trails (full history, never cleared) ────────
   _drawPermTrails(bodies, camera) {
     const ctx = this.ctx;
+    // Fixed jump threshold: perm trail records every 4 physics steps so consecutive
+    // points are always close together unless the body was teleported (drag, preset load).
+    // 100 AU² = 10 AU gap — catches any genuine teleport, never triggers on real motion.
+    const JUMP_SQ_PERM = 100;
+
     for (const b of bodies) {
       const trail = b.permTrail;
       if (!trail || trail.length < 2) continue;
       const hex = b.color;
-      const r  = parseInt(hex.slice(1,3),16);
-      const g  = parseInt(hex.slice(3,5),16);
-      const bl = parseInt(hex.slice(5,7),16);
+      const [r, g, bl] = hexRgb(hex);
 
-      // Draw in one path — uniform low opacity so it doesn't overwhelm
       ctx.beginPath();
       let started = false;
-      for (let i = 0; i < trail.length; i++) {
+      for (let i = 0; i < trail.length - 1; i++) {
+        const wdx = trail[i+1].x - trail[i].x;
+        const wdy = trail[i+1].y - trail[i].y;
+        if (wdx*wdx + wdy*wdy > JUMP_SQ_PERM) {
+          // Gap (body was teleported/dragged) — commit and restart
+          ctx.strokeStyle = `rgba(${r},${g},${bl},0.18)`;
+          ctx.lineWidth   = 0.8;
+          ctx.stroke();
+          ctx.beginPath();
+          started = false;
+          continue;
+        }
         const sp = camera.worldToScreen(trail[i].x, trail[i].y, this.canvas);
         if (!started) { ctx.moveTo(sp.x, sp.y); started = true; }
-        else           ctx.lineTo(sp.x, sp.y);
+        else {
+          const sp2 = camera.worldToScreen(trail[i+1].x, trail[i+1].y, this.canvas);
+          ctx.lineTo(sp2.x, sp2.y);
+        }
       }
       ctx.strokeStyle = `rgba(${r},${g},${bl},0.18)`;
       ctx.lineWidth   = 0.8;
@@ -136,18 +152,16 @@ export class Renderer {
   // ── Live orbital trails (ring buffer, fades) ────────────
   _drawTrails(bodies, camera) {
     const ctx = this.ctx;
+    // 4 opacity bands: oldest (faintest) to newest (brightest)
     const BANDS = 4;
-    // Jump threshold: consecutive world points > 2 AU apart = ring-buffer wrap
-    // Break the path there to avoid the diagonal "teleport" line artifact
-    const JUMP_SQ = 4.0;
 
     for (const b of bodies) {
       const trail = b.getTrail();
       if (trail.length < 3) continue;
-      const hex = b.color;
-      const r  = parseInt(hex.slice(1,3),16);
-      const g  = parseInt(hex.slice(3,5),16);
-      const bl = parseInt(hex.slice(5,7),16);
+      // getTrail() always returns points in chronological order (handles ring-buffer
+      // reordering internally), so we can draw straight sequential paths — no jump
+      // detection needed here. Position teleports are handled by clearTrail/clearPermTrail.
+      const [r, g, bl] = hexRgb(b.color);
       const segs = trail.length - 1;
 
       for (let band = 0; band < BANDS; band++) {
@@ -159,23 +173,11 @@ export class Renderer {
         const iEnd   = Math.min(segs, Math.ceil(t1 * segs));
 
         ctx.beginPath();
-        let started = false;
-        for (let i = iStart; i < iEnd; i++) {
-          const wdx = trail[i+1].x - trail[i].x;
-          const wdy = trail[i+1].y - trail[i].y;
-          if (wdx*wdx + wdy*wdy > JUMP_SQ) {
-            // Ring wrapped — commit sub-path and restart
-            ctx.strokeStyle = `rgba(${r},${g},${bl},${alpha})`;
-            ctx.lineWidth   = lw;
-            ctx.stroke();
-            ctx.beginPath();
-            started = false;
-            continue;
-          }
-          const p1 = camera.worldToScreen(trail[i].x,   trail[i].y,   this.canvas);
-          const p2 = camera.worldToScreen(trail[i+1].x, trail[i+1].y, this.canvas);
-          if (!started) { ctx.moveTo(p1.x, p1.y); started = true; }
-          ctx.lineTo(p2.x, p2.y);
+        const p0 = camera.worldToScreen(trail[iStart].x, trail[iStart].y, this.canvas);
+        ctx.moveTo(p0.x, p0.y);
+        for (let i = iStart + 1; i <= iEnd; i++) {
+          const p = camera.worldToScreen(trail[i].x, trail[i].y, this.canvas);
+          ctx.lineTo(p.x, p.y);
         }
         ctx.strokeStyle = `rgba(${r},${g},${bl},${alpha})`;
         ctx.lineWidth   = lw;
@@ -191,9 +193,7 @@ export class Renderer {
     const sr  = Math.max(2, camera.worldSizeToScreen(b.radius));
 
     const hex = b.color;
-    const r  = parseInt(hex.slice(1,3),16);
-    const g  = parseInt(hex.slice(3,5),16);
-    const bl = parseInt(hex.slice(5,7),16);
+    const [r, g, bl] = hexRgb(hex);
 
     const glowMap = {
       star:        [{ f:7, a:0.025 }, { f:4, a:0.06 }, { f:2.2, a:0.12 }, { f:1.4, a:0.2 }],
@@ -223,9 +223,7 @@ export class Renderer {
     const sr  = Math.max(2, camera.worldSizeToScreen(b.radius));
 
     const hex = b.color;
-    const r  = parseInt(hex.slice(1,3),16);
-    const g  = parseInt(hex.slice(3,5),16);
-    const bl = parseInt(hex.slice(5,7),16);
+    const [r, g, bl] = hexRgb(hex);
 
     if      (b.type === 'star')        this._drawStar(ctx, sp, sr, r, g, bl);
     else if (b.type === 'blackhole')   this._drawBlackHole(ctx, sp, sr, b);
@@ -257,7 +255,7 @@ export class Renderer {
       ctx.lineWidth   = 0.75;
       ctx.setLineDash([]);
       ctx.stroke();
-      ctx.lineWidth = 1; // FIX: reset lineWidth so outer draws aren't affected
+      ctx.lineWidth = 1; // reset lineWidth so outer draws are not affected
 
       ctx.restore();
 
@@ -455,9 +453,7 @@ export class Renderer {
   // ── Comet ───────────────────────────────────────────────
   _drawComet(ctx, sp, sr, body) {
     ctx.save();
-    const r  = parseInt(body.color.slice(1,3),16);
-    const g  = parseInt(body.color.slice(3,5),16);
-    const bl = parseInt(body.color.slice(5,7),16);
+    const [r, g, bl] = hexRgb(body.color);
 
     // Nucleus
     ctx.beginPath();
@@ -481,184 +477,179 @@ export class Renderer {
     ctx.restore();
   }
 
-  // ── Velocity arrow + orbit preview ─────────────────────
-  // velArrow = { fromWorld, toScreen }
-  // Draws the arrow, speed labels, and — when there's a dominant
-  // attractor nearby — a predicted circular-orbit radius ring.
-  _drawVelArrow(velArrow, camera, bodies, selectedId) {
+  // ── Velocity arrow ───────────────────────────────────────
+  // velArrow = { fromWorld, toScreen, _snapped }
+  // Draws orbit ring, predicted trace, snap indicator, and arrow shaft.
+  _drawVelArrow(velArrow, camera, bodies, selectedId, physics) {
     const ctx = this.ctx;
     const { fromWorld, toScreen } = velArrow;
     const sp  = camera.worldToScreen(fromWorld.x, fromWorld.y, this.canvas);
-
-    const dx  = toScreen.x - sp.x;
-    const dy  = toScreen.y - sp.y;
+    const dx  = toScreen.x - sp.x, dy = toScreen.y - sp.y;
     const len = Math.sqrt(dx*dx + dy*dy);
     if (len < 4) return;
 
-    const angle = Math.atan2(dy, dx);
-    // Convert arrow pixels → AU/yr — MUST match ui.js _arrowToVelocity formula:
-    // ui.js: velocity = (screen_delta / zoom) * SENSITIVITY  where SENSITIVITY=2.5
     const SENSITIVITY = 2.5;
     const speedAUyr = (len / camera.zoom) * SENSITIVITY;
     const speedKms  = speedAUyr * SIM.velUnit;
+    const angle     = Math.atan2(dy, dx);
+    const G         = (physics && physics.G) ? physics.G : SIM.G;
 
-    // ── Orbit preview ring ────────────────────────────────
-    // Find the most massive other body (the "attractor")
-    const G = SIM.G;  // use canonical value from Body.js
+    // Find dominant attractor (most massive other body)
     let attractor = null;
     for (const b of bodies) {
-      if (b.id === selectedId) continue;
-      if (!attractor || b.mass > attractor.mass) attractor = b;
-    }
-    if (attractor) {
-      // Vis-viva: v² = G·M·(2/r − 1/a)  — for circular orbit a=r, so v_circ=√(GM/r)
-      // We invert to find what radius gives the current speed: r_circ = GM / v²
-      const v2 = speedAUyr * speedAUyr;
-      if (v2 > 1e-10) {
-        const r_circ = G * attractor.mass / v2;
-        const asc    = camera.worldToScreen(attractor.x, attractor.y, this.canvas);
-        const r_px   = camera.worldSizeToScreen(r_circ);
-
-        // Only draw if orbit fits reasonably on screen
-        if (r_px > 10 && r_px < 8000) {
-          // Color: green if close to circular, yellow/red if hyperbolic
-          // Actual distance from attractor
-          const actualDist = Math.sqrt(
-            (fromWorld.x - attractor.x)**2 + (fromWorld.y - attractor.y)**2
-          );
-          const v_circ = Math.sqrt(G * attractor.mass / actualDist);
-          const v_esc  = v_circ * Math.sqrt(2);
-          let   orbitColor;
-          if (speedAUyr < v_circ * 0.98)       orbitColor = 'rgba(80,200,120,0.25)';   // sub-circular (ellipse)
-          else if (speedAUyr < v_esc * 0.98)    orbitColor = 'rgba(80,200,255,0.25)';   // near-circular (blue)
-          else                                   orbitColor = 'rgba(255,120,60,0.25)';   // escape (red)
-
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(asc.x, asc.y, r_px, 0, Math.PI * 2);
-          ctx.strokeStyle = orbitColor.replace('0.25', '0.5');
-          ctx.lineWidth   = 1;
-          ctx.setLineDash([4, 6]);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // Subtle fill
-          ctx.beginPath();
-          ctx.arc(asc.x, asc.y, r_px, 0, Math.PI * 2);
-          ctx.fillStyle = orbitColor;
-          ctx.fill();
-          ctx.restore();
-
-          // Label: orbit type with non-overlapping speed bands
-          // ELLIPTIC  → v < 95% of circular
-          // CIRCULAR  → 95%–110% of circular (stable orbit zone)
-          // HYPERBOLIC→ v > escape velocity
-          const orbitType = speedAUyr > v_esc         ? 'HYPERBOLIC'
-                          : speedAUyr > v_circ * 1.10 ? 'SUPER-CIRC'
-                          : speedAUyr > v_circ * 0.95 ? 'CIRCULAR'
-                          :                             'ELLIPTIC';
-          const labelColor = speedAUyr > v_esc         ? 'rgba(255,120,60,0.95)'
-                           : speedAUyr > v_circ * 0.95 ? 'rgba(80,200,255,0.95)'
-                           :                             'rgba(80,200,120,0.95)';
-          ctx.save();
-          ctx.font      = '700 9px "Orbitron", monospace';
-          ctx.fillStyle = labelColor;
-          ctx.textAlign = 'left';
-          // Position label at top-right of ring, clamped so it doesn't fly off screen
-          const labX = Math.min(this.canvas.width  - 90, asc.x + r_px * 0.707 + 6);
-          const labY = Math.max(16,                      asc.y - r_px * 0.707 - 4);
-          ctx.fillText(orbitType, labX, labY);
-          ctx.restore();
-        }
-      }
+      if (b.id !== selectedId && (!attractor || b.mass > attractor.mass)) attractor = b;
     }
 
-    // ── Predicted path trace (fix #9) ─────────────────────
-    // Run a lightweight Euler forward-integration to sketch where the body will go.
-    // Uses only the dominant attractor for speed; good enough for a visual guide.
-    if (attractor && len >= 4) {
-      const body = bodies.find(b => b.id === selectedId);
-      if (body) {
-        // Reconstruct velocity from arrow direction + snapped speed
-        let traceVx, traceVy;
-        if (velArrow._snapped && attractor) {
-          const dx2 = body.x - attractor.x, dy2 = body.y - attractor.y;
-          const r2   = Math.sqrt(dx2*dx2 + dy2*dy2);
-          const v_circ = Math.sqrt(G * attractor.mass / r2);
-          const perpCCW = { x: -dy2/r2, y: dx2/r2 };
-          const perpCW  = { x:  dy2/r2, y: -dx2/r2 };
-          const rawVx = (toScreen.x - sp.x) / camera.zoom * SENSITIVITY;
-          const rawVy = (toScreen.y - sp.y) / camera.zoom * SENSITIVITY;
-          const dot   = rawVx * perpCCW.x + rawVy * perpCCW.y;
-          const perp  = dot >= 0 ? perpCCW : perpCW;
-          traceVx = perp.x * v_circ; traceVy = perp.y * v_circ;
-        } else {
-          traceVx = (toScreen.x - sp.x) / camera.zoom * SENSITIVITY;
-          traceVy = (toScreen.y - sp.y) / camera.zoom * SENSITIVITY;
-        }
+    this._drawOrbitRing(ctx, camera, attractor, fromWorld, speedAUyr, G);
+    this._drawPredictedTrace(ctx, camera, bodies, selectedId, attractor, velArrow, sp, toScreen, G, SENSITIVITY);
+    this._drawSnapIndicator(ctx, sp, velArrow);
+    this._drawArrowShaft(ctx, sp, toScreen, angle, speedAUyr, speedKms, velArrow);
+  }
 
-        // Trace up to 300 steps of dt=0.008 yr each (≈2.4 yr lookahead)
-        const traceDt  = 0.008;
-        const traceMax = 300;
-        let tx = body.x, ty = body.y, tvx = traceVx, tvy = traceVy;
+  // ── Orbit preview ring ────────────────────────────────────
+  _drawOrbitRing(ctx, camera, attractor, fromWorld, speedAUyr, G) {
+    if (!attractor) return;
+    const v2 = speedAUyr * speedAUyr;
+    if (v2 <= 1e-10) return;
+    const r_circ = G * attractor.mass / v2;
+    const asc    = camera.worldToScreen(attractor.x, attractor.y, this.canvas);
+    const r_px   = camera.worldSizeToScreen(r_circ);
+    if (r_px < 10 || r_px > 8000) return;
 
-        const pts = [];
-        pts.push(camera.worldToScreen(tx, ty, this.canvas));
+    const actualDist = Math.sqrt((fromWorld.x-attractor.x)**2 + (fromWorld.y-attractor.y)**2);
+    const v_circ     = Math.sqrt(G * attractor.mass / actualDist);
+    const v_esc      = v_circ * Math.sqrt(2);
+    const orbitColor =
+      speedAUyr < v_circ * 0.98 ? 'rgba(80,200,120,0.25)' :
+      speedAUyr < v_esc  * 0.98 ? 'rgba(80,200,255,0.25)' :
+                                   'rgba(255,120,60,0.25)';
 
-        for (let t = 0; t < traceMax; t++) {
-          const adx = attractor.x - tx, ady = attractor.y - ty;
-          const ar2 = adx*adx + ady*ady + 0.0025; // tiny softening
-          const ar3 = ar2 * Math.sqrt(ar2);
-          const ax  = G * attractor.mass * adx / ar3;
-          const ay  = G * attractor.mass * ady / ar3;
-          tvx += ax * traceDt;
-          tvy += ay * traceDt;
-          tx  += tvx * traceDt;
-          ty  += tvy * traceDt;
-          pts.push(camera.worldToScreen(tx, ty, this.canvas));
-          // Stop if we've gone very far or looped back close to start
-          if (t > 20) {
-            const dsx = pts[pts.length-1].x - pts[0].x;
-            const dsy = pts[pts.length-1].y - pts[0].y;
-            if (dsx*dsx + dsy*dsy < 100 && t > 60) break; // ~10px close = loop closed
-          }
-          // Stop if offscreen by a lot
-          const p = pts[pts.length-1];
-          if (p.x < -400 || p.x > this.canvas.width+400 ||
-              p.y < -400 || p.y > this.canvas.height+400) break;
-        }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(asc.x, asc.y, r_px, 0, Math.PI * 2);
+    ctx.strokeStyle = orbitColor.replace('0.25','0.5');
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([4, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(asc.x, asc.y, r_px, 0, Math.PI * 2);
+    ctx.fillStyle = orbitColor;
+    ctx.fill();
+    ctx.restore();
 
-        if (pts.length > 2) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.moveTo(pts[0].x, pts[0].y);
-          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-          const traceColor = velArrow._snapped ? 'rgba(80,255,160,0.55)'
-                           : speedAUyr > (attractor ? Math.sqrt(G*attractor.mass / Math.sqrt(
-                                 (body.x-attractor.x)**2+(body.y-attractor.y)**2
-                               )) * Math.sqrt(2) : Infinity)
-                             ? 'rgba(255,120,60,0.45)'
-                             : 'rgba(80,210,255,0.35)';
-          ctx.strokeStyle = traceColor;
-          ctx.lineWidth   = 1.5;
-          ctx.setLineDash([3, 4]);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.restore();
-        }
-      }
-    }
+    const orbitType =
+      speedAUyr > v_esc        ? 'HYPERBOLIC' :
+      speedAUyr > v_circ*1.10  ? 'SUPER-CIRC' :
+      speedAUyr > v_circ*0.95  ? 'CIRCULAR'   : 'ELLIPTIC';
+    const labelColor =
+      speedAUyr > v_esc        ? 'rgba(255,120,60,0.95)' :
+      speedAUyr > v_circ*0.95  ? 'rgba(80,200,255,0.95)' : 'rgba(80,200,120,0.95)';
+    ctx.save();
+    ctx.font      = '700 9px "Orbitron", monospace';
+    ctx.fillStyle = labelColor;
+    ctx.textAlign = 'left';
+    const labX = Math.min(this.canvas.width  - 90, asc.x + r_px * 0.707 + 6);
+    const labY = Math.max(16,                      asc.y - r_px * 0.707 - 4);
+    ctx.fillText(orbitType, labX, labY);
+    ctx.restore();
+  }
 
-    // ── Snap indicator (fix #7) ───────────────────────────
+  // ── Predicted orbit trace (Velocity Verlet, single attractor) ─
+  _drawPredictedTrace(ctx, camera, bodies, selectedId, attractor, velArrow, sp, toScreen, G, SENSITIVITY) {
+    if (!attractor) return;
+    const body = bodies.find(b => b.id === selectedId);
+    if (!body) return;
+
+    let traceVx, traceVy;
     if (velArrow._snapped) {
-      ctx.save();
-      ctx.font      = '700 9px "Orbitron", monospace';
-      ctx.fillStyle = 'rgba(80,255,160,0.95)';
-      ctx.textAlign = 'center';
-      ctx.fillText('⊙ CIRCULAR LOCK', sp.x, sp.y - 18);
-      ctx.restore();
+      const dx = body.x - attractor.x, dy = body.y - attractor.y;
+      const r  = Math.sqrt(dx*dx + dy*dy);
+      const v_circ  = Math.sqrt(G * attractor.mass / r);
+      const perpCCW = { x: -dy/r, y: dx/r };
+      const perpCW  = { x:  dy/r, y: -dx/r };
+      const rawVx = (toScreen.x - sp.x) / camera.zoom * SENSITIVITY;
+      const rawVy = (toScreen.y - sp.y) / camera.zoom * SENSITIVITY;
+      const perp  = (rawVx * perpCCW.x + rawVy * perpCCW.y) >= 0 ? perpCCW : perpCW;
+      traceVx = perp.x * v_circ;
+      traceVy = perp.y * v_circ;
+    } else {
+      traceVx = (toScreen.x - sp.x) / camera.zoom * SENSITIVITY;
+      traceVy = (toScreen.y - sp.y) / camera.zoom * SENSITIVITY;
     }
 
+    // Velocity Verlet integration (replaces old Euler — much more accurate near BH)
+    const traceDt  = 0.004;
+    const traceMax = 500;
+    let tx = body.x, ty = body.y, tvx = traceVx, tvy = traceVy;
+
+    // Compute initial acceleration
+    const adx0 = attractor.x - tx, ady0 = attractor.y - ty;
+    const ar2_0 = adx0*adx0 + ady0*ady0 + 0.0025;
+    const ar3_0 = ar2_0 * Math.sqrt(ar2_0);
+    let ax_old = G * attractor.mass * adx0 / ar3_0;
+    let ay_old = G * attractor.mass * ady0 / ar3_0;
+
+    const pts = [camera.worldToScreen(tx, ty, this.canvas)];
+    for (let t = 0; t < traceMax; t++) {
+      // Step 1: position with current acceleration
+      tx += tvx * traceDt + 0.5 * ax_old * traceDt * traceDt;
+      ty += tvy * traceDt + 0.5 * ay_old * traceDt * traceDt;
+      // Step 2: recompute acceleration at new position
+      const adx = attractor.x - tx, ady = attractor.y - ty;
+      const ar2 = adx*adx + ady*ady + 0.0025;
+      const ar3 = ar2 * Math.sqrt(ar2);
+      const ax_new = G * attractor.mass * adx / ar3;
+      const ay_new = G * attractor.mass * ady / ar3;
+      // Step 3: velocity with average acceleration
+      tvx += 0.5 * (ax_old + ax_new) * traceDt;
+      tvy += 0.5 * (ay_old + ay_new) * traceDt;
+      ax_old = ax_new; ay_old = ay_new;
+
+      pts.push(camera.worldToScreen(tx, ty, this.canvas));
+      // Early exit: loop closed
+      if (t > 60) {
+        const dsx = pts[pts.length-1].x - pts[0].x;
+        const dsy = pts[pts.length-1].y - pts[0].y;
+        if (dsx*dsx + dsy*dsy < 100) break;
+      }
+      // Early exit: far offscreen
+      const p = pts[pts.length-1];
+      if (p.x < -400 || p.x > this.canvas.width+400 || p.y < -400 || p.y > this.canvas.height+400) break;
+    }
+    if (pts.length < 3) return;
+
+    const actualDist = Math.sqrt((body.x-attractor.x)**2 + (body.y-attractor.y)**2);
+    const v_esc      = Math.sqrt(2 * G * attractor.mass / actualDist);
+    const traceVspd  = Math.sqrt(traceVx*traceVx + traceVy*traceVy);
+    const traceColor = velArrow._snapped         ? 'rgba(80,255,160,0.55)'
+                     : traceVspd > v_esc         ? 'rgba(255,120,60,0.45)'
+                     :                             'rgba(80,210,255,0.35)';
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = traceColor;
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([3, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // ── Circular lock indicator ──────────────────────────────
+  _drawSnapIndicator(ctx, sp, velArrow) {
+    if (!velArrow._snapped) return;
+    ctx.save();
+    ctx.font      = '700 9px "Orbitron", monospace';
+    ctx.fillStyle = 'rgba(80,255,160,0.95)';
+    ctx.textAlign = 'center';
+    ctx.fillText('⊙ CIRCULAR LOCK', sp.x, sp.y - 18);
+    ctx.restore();
+  }
+
+  // ── Arrow shaft, arrowhead, and speed label pill ─────────
+  _drawArrowShaft(ctx, sp, toScreen, angle, speedAUyr, speedKms, velArrow) {
     const arrowColor = velArrow._snapped ? 'rgba(80,255,160,0.92)' : 'rgba(80,210,255,0.92)';
     const arrowGlow  = velArrow._snapped ? 'rgba(80,255,160,0.5)'  : 'rgba(80,210,255,0.5)';
     ctx.save();
@@ -667,8 +658,6 @@ export class Renderer {
     ctx.lineWidth   = velArrow._snapped ? 2.5 : 2;
     ctx.shadowColor = arrowGlow;
     ctx.shadowBlur  = velArrow._snapped ? 14 : 8;
-
-    // Dashed shaft
     ctx.setLineDash([6, 4]);
     ctx.beginPath();
     ctx.moveTo(sp.x, sp.y);
@@ -676,34 +665,26 @@ export class Renderer {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Arrowhead
     const hs = 10;
     ctx.shadowBlur = 4;
     ctx.beginPath();
     ctx.moveTo(toScreen.x, toScreen.y);
-    ctx.lineTo(toScreen.x - hs * Math.cos(angle - 0.38), toScreen.y - hs * Math.sin(angle - 0.38));
-    ctx.lineTo(toScreen.x - hs * Math.cos(angle + 0.38), toScreen.y - hs * Math.sin(angle + 0.38));
+    ctx.lineTo(toScreen.x - hs*Math.cos(angle-0.38), toScreen.y - hs*Math.sin(angle-0.38));
+    ctx.lineTo(toScreen.x - hs*Math.cos(angle+0.38), toScreen.y - hs*Math.sin(angle+0.38));
     ctx.closePath();
     ctx.fill();
 
-    // ── Speed labels ─────────────────────────────────────
+    // Speed label pill
     ctx.shadowBlur = 0;
-    const lx = toScreen.x + 12;
-    const ly = toScreen.y - 10;
-
-    // Background pill — manual path, roundRect not available in Firefox <112 / Safari <15.4
+    const lx = toScreen.x + 12, ly = toScreen.y - 10;
     ctx.fillStyle = 'rgba(5,8,16,0.82)';
     ctx.beginPath();
-    const px = lx - 4, py = ly - 14, pw = 116, ph = 32, pr = 4;
-    ctx.moveTo(px + pr, py);
-    ctx.lineTo(px + pw - pr, py);
-    ctx.arcTo(px+pw, py,    px+pw, py+pr,    pr);
-    ctx.lineTo(px+pw, py+ph-pr);
-    ctx.arcTo(px+pw, py+ph, px+pw-pr, py+ph, pr);
-    ctx.lineTo(px+pr, py+ph);
-    ctx.arcTo(px, py+ph, px, py+ph-pr, pr);
-    ctx.lineTo(px, py+pr);
-    ctx.arcTo(px, py, px+pr, py, pr);
+    const px=lx-4, py=ly-14, pw=116, ph=32, pr=4;
+    ctx.moveTo(px+pr, py);
+    ctx.lineTo(px+pw-pr, py);   ctx.arcTo(px+pw,py,    px+pw,py+pr,   pr);
+    ctx.lineTo(px+pw, py+ph-pr); ctx.arcTo(px+pw,py+ph, px+pw-pr,py+ph,pr);
+    ctx.lineTo(px+pr, py+ph);   ctx.arcTo(px,py+ph, px,py+ph-pr,pr);
+    ctx.lineTo(px, py+pr);      ctx.arcTo(px,py, px+pr,py,pr);
     ctx.closePath();
     ctx.fill();
 
@@ -711,11 +692,9 @@ export class Renderer {
     ctx.fillStyle = velArrow._snapped ? 'rgba(80,255,160,0.98)' : 'rgba(160,230,255,0.98)';
     ctx.textAlign = 'left';
     ctx.fillText(speedKms.toFixed(1) + ' km/s', lx, ly);
-
     ctx.font      = '9px "Space Mono", monospace';
     ctx.fillStyle = velArrow._snapped ? 'rgba(80,220,140,0.8)' : 'rgba(100,180,220,0.7)';
     ctx.fillText(speedAUyr.toFixed(3) + ' AU/yr', lx, ly + 13);
-
     ctx.restore();
   }
 }

@@ -1,6 +1,6 @@
 // effects.js — collision flashes, shockwaves, debris, floating text
-// FIX: all effects stored in WORLD coords, converted to screen each draw call
-//      so they follow the camera correctly if user pans/zooms mid-effect.
+// Effects use world-space positions so camera pan/zoom during an effect looks correct.
+import { hexRgb } from './bodies/Body.js';
 
 export class Effects {
   constructor() {
@@ -42,7 +42,6 @@ export class Effects {
     });
 
     // Debris particles stored as world-space positions + world-space velocities
-    const zoom = camera.zoom;
     const speedBase = event.r * 0.4;   // world units / frame
     const count = Math.min(40, Math.max(14, Math.floor(event.r * 8)));
     for (let i = 0; i < count; i++) {
@@ -161,9 +160,6 @@ export class Effects {
   }
 }
 
-function hexRgb(hex) {
-  return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
-}
 function blendHex(a, b, t) {
   const [ra,ga,ba] = hexRgb(a), [rb,gb,bb] = hexRgb(b);
   return '#' + [

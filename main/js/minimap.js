@@ -1,3 +1,4 @@
+import { hexRgb } from './bodies/Body.js';
 // minimap.js — small overview canvas showing all bodies and viewport rect
 
 export class Minimap {
@@ -55,9 +56,7 @@ export class Minimap {
       if (trail.length < 2) continue;
       const stride = Math.max(1, Math.ceil(trail.length / MAX_TRAIL_SEGS));
       const hex = b.color;
-      const r = parseInt(hex.slice(1,3),16);
-      const g = parseInt(hex.slice(3,5),16);
-      const bl = parseInt(hex.slice(5,7),16);
+      const [r, g, bl] = hexRgb(hex);
       ctx.beginPath();
       let started = false;
       for (let i = 0; i < trail.length; i += stride) {
@@ -109,7 +108,8 @@ export class Minimap {
     const barLabel = barAU >= 1 ? barAU.toFixed(0) + ' AU' : barAU + ' AU';
 
     const bx = offX;
-    const by = offY + (rangeY * scale) + 6;  // just below the mapped world extent
+    // Position bar below the minimap content, clamped to canvas bounds
+    const by = Math.min(H - 16, offY + (rangeY * scale) + 6);
 
     ctx.fillStyle    = 'rgba(91,142,255,0.85)';
     ctx.fillRect(bx, by, barPx, 2);

@@ -1,7 +1,9 @@
 // ui.js — interaction layer
 
-import { Body, SIM } from './bodies/Body.js';
+import { Body, SIM, classifyType } from './bodies/Body.js';
 import { PRESETS } from './presets.js';
+import { PropsPanel } from './props-panel.js';
+import { HUD } from './hud.js';
 
 // ── Helpers ───────────────────────────────────────────────
 function vxyToSpeedDir(vx, vy) {
@@ -69,10 +71,37 @@ export class UI {
     this._dialDragging = false;
 
     this._bindEvents();
-    this._bindProps();
     this._bindToolbar();
     this._bindKeyboard();
     this._buildPresetsModal();
+    this._cacheDOMRefs();
+
+    // Sub-controllers
+    this.propsPanel = new PropsPanel({
+      bodies:        this.bodies,
+      physics:       this.physics,
+      renderer:      this.renderer,
+      canvas:        this.canvas,
+      getSelectedId: () => this.selectedId,
+      onDelete:      () => this._deleteSelected(),
+    });
+    this.hud = new HUD();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // DOM ELEMENT CACHE
+  // Pre-resolved once at startup to avoid repeated getElementById in hot paths.
+  // HUD elements live in hud.js; props panel elements live in props-panel.js.
+  // Only elements used directly by UI (drag hints, selection, vel-arrow) are here.
+  // ─────────────────────────────────────────────────────────
+  _cacheDOMRefs() {
+    this._dom = {
+      // Vel-arrow hint and empty-canvas hint
+      velArrowHint:    document.getElementById('vel-arrow-hint'),
+      emptyHint:       document.getElementById('empty-hint'),
+      // Reclassify toast (also referenced by PropsPanel via its own _dom)
+      reclassifyToast: document.getElementById('reclassify-toast'),
+    };
   }
 
   // ─────────────────────────────────────────────────────────
@@ -129,7 +158,8 @@ export class UI {
           body.x = world.x - this._dragBodyOffset.x;
           body.y = world.y - this._dragBodyOffset.y;
           body.clearTrail();
-          if (this.selectedId === body.id) this._updatePropsPanel(body);
+          body.clearPermTrail();   // prevent teleport line in permanent trail
+          if (this.selectedId === body.id) this.propsPanel.update(body);
         }
         return;
       }
@@ -155,15 +185,21 @@ export class UI {
         return;
       }
 
-      // ── Tooltip on hover (idle) ───────────────────────────
+      // ── Tooltip + cursor on hover (idle) ─────────────────
       if (e.clientX >= rect.left && e.clientX <= rect.right &&
           e.clientY >= rect.top  && e.clientY <= rect.bottom) {
         const world = this.camera.screenToWorld(sx, sy, this.canvas);
         const hit   = this._hitTest(world.x, world.y);
-        if (hit && hit.id !== this.selectedId) this._showTooltip(hit, e.clientX, e.clientY);
-        else this._hideTooltip();
+        if (hit && hit.id !== this.selectedId) {
+          this._showTooltip(hit, e.clientX, e.clientY);
+          container.style.cursor = 'grab';   // hint: draggable
+        } else {
+          this._hideTooltip();
+          container.style.cursor = '';        // back to CSS crosshair default
+        }
       } else {
         this._hideTooltip();
+        container.style.cursor = '';
       }
     });
 
@@ -197,7 +233,7 @@ export class UI {
         // pending-body with no drag = pure click → now open props panel
         if (prevMode === 'pending-body' && this._dragBodyId !== null) {
           const body = this.bodies.find(b => b.id === this._dragBodyId);
-          if (body) this._openPropsPanel(body);
+          if (body) this.propsPanel.open(body);
         }
         return;
       }
@@ -218,7 +254,7 @@ export class UI {
             body.vy = vel.vy;
             body.clearTrail();
             this.physics.markDirty();
-            this._updatePropsPanel(body);
+            this.propsPanel.update(body);
           }
         }
         this.velArrow = null;
@@ -329,7 +365,9 @@ export class UI {
       const hit   = this._hitTest(world.x, world.y);
 
       if (hit) {
-        this.select(hit.id);
+        // Set selection visually but DON'T open props panel yet — defer to touchend
+        // (same pattern as mousedown, prevents panel opening during vel-arrow drag)
+        this.selectedId  = hit.id;
         this._hideTooltip();
         this._dragMode   = 'pending-body';
         this._dragBodyId = hit.id;
@@ -401,11 +439,20 @@ export class UI {
       const prevMode = this._dragMode;
       this._dragMode = 'none';
 
+      // Pure tap on a body (pending-body, no drag) → open props panel
+      if (prevMode === 'pending-body' && this._dragBodyId !== null) {
+        const body = this.bodies.find(b => b.id === this._dragBodyId);
+        if (body) this.propsPanel.open(body);
+        this._dragBodyId = null;
+        return;
+      }
+
       if (prevMode === 'vel') {
+        // Capture body ref before clearing _dragBodyId
+        const body = this.bodies.find(b => b.id === this._dragBodyId);
         // Find last touch (changedTouches has the lifted finger)
         const t   = e.changedTouches[0];
         const pos = getTouchPos(t);
-        const body = this.bodies.find(b => b.id === this._dragBodyId);
         if (body) {
           const vel = this._arrowToVelocity(body, pos.x, pos.y);
           const ws  = this.camera.worldToScreen(body.x, body.y, canvas);
@@ -415,7 +462,7 @@ export class UI {
             body.vy = vel.vy;
             body.clearTrail();
             this.physics.markDirty();
-            this._updatePropsPanel(body);
+            this.propsPanel.update(body);
           }
         }
         this.velArrow    = null;
@@ -455,9 +502,9 @@ export class UI {
     let vx = worldDx * SENSITIVITY;
     let vy = worldDy * SENSITIVITY;
 
-    // ── Circular orbit snap (fix #7) ──────────────────────
+    // ── Circular orbit snap ───────────────────────────────
     // Find the most massive other body (attractor)
-    const G = 1.9855e-5;  // SIM.G
+    const G = this.physics.G;  // use live G (may be modified by G slider)
     let attractor = null;
     for (const b of this.bodies) {
       if (b.id === body.id) continue;
@@ -494,12 +541,7 @@ export class UI {
   }
 
   _previewVelocity(vx, vy) {
-    const { speedKms, deg } = vxyToSpeedDir(vx, vy);
-    const se = document.getElementById('prop-speed');
-    const de = document.getElementById('prop-dir');
-    if (se) se.value = speedKms.toFixed(2);
-    if (de) de.value = deg.toFixed(1);
-    this._updateDial(deg);
+    this.propsPanel.previewVelocity(vx, vy);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -524,10 +566,11 @@ export class UI {
     this.select(b.id);
     this._updateHint();
     this.physics.markDirty();
-    // BUG1 FIX: only auto-fit on the very first body.
-    // After that respect the user's zoom — re-fitting on every drop is jarring.
+    // Only auto-fit on first body — re-fitting on every drop causes jarring zoom jumps
     if (this.bodies.length === 1) {
       this.camera.fitBodies(this.bodies, this.canvas);
+      // Auto-start on first body so the canvas feels live immediately
+      if (!this.physics.running) this.togglePlay();
     }
     this.onUpdate();
   }
@@ -570,8 +613,8 @@ export class UI {
   // ─────────────────────────────────────────────────────────
   // VEL HINT
   // ─────────────────────────────────────────────────────────
-  _showHint() { const e = document.getElementById('vel-arrow-hint'); if (e) e.classList.remove('hidden'); }
-  _hideHint() { const e = document.getElementById('vel-arrow-hint'); if (e) e.classList.add('hidden'); }
+  _showHint() { if (this._dom.velArrowHint) this._dom.velArrowHint.classList.remove('hidden'); }
+  _hideHint() { if (this._dom.velArrowHint) this._dom.velArrowHint.classList.add('hidden'); }
 
   // ─────────────────────────────────────────────────────────
   // SELECTION
@@ -579,117 +622,13 @@ export class UI {
   select(id) {
     this.selectedId = id;
     const body = this.bodies.find(b => b.id === id);
-    if (body) this._openPropsPanel(body);
+    if (body) this.propsPanel.open(body);
   }
-  deselect() { this.selectedId = null; this._closePropsPanel(); }
+  deselect() { this.selectedId = null; this.propsPanel.close(); }
 
   // ─────────────────────────────────────────────────────────
   // PROPS PANEL
   // ─────────────────────────────────────────────────────────
-  _openPropsPanel(body) {
-    document.getElementById('props-panel').classList.remove('hidden');
-    document.body.classList.add('props-open');
-    this._updatePropsPanel(body);
-    // Resize canvas after CSS transition so coordinate math stays correct
-    requestAnimationFrame(() => {
-      const c = this.canvas.parentElement;
-      this.renderer.resize(c.clientWidth, c.clientHeight);
-    });
-  }
-  _closePropsPanel() {
-    document.getElementById('props-panel').classList.add('hidden');
-    document.body.classList.remove('props-open');
-    requestAnimationFrame(() => {
-      const c = this.canvas.parentElement;
-      this.renderer.resize(c.clientWidth, c.clientHeight);
-    });
-  }
-  _updatePropsPanel(body) {
-    document.getElementById('props-type-label').textContent = body.type.toUpperCase();
-    document.getElementById('prop-name').value   = body.name;
-    const md = massToDisplay(body);
-    document.getElementById('prop-mass').value = md.val.toFixed(4);
-    const massUnitEl = document.getElementById('mass-unit-label');
-    if (massUnitEl) massUnitEl.textContent = md.unit;
-    document.getElementById('prop-radius').value = body.radius.toFixed(2);
-    document.getElementById('prop-color').value  = body.color;
-    document.getElementById('prop-color-hex').textContent = body.color;
-    const { speedKms, deg } = vxyToSpeedDir(body.vx, body.vy);
-    document.getElementById('prop-speed').value = speedKms.toFixed(2);
-    document.getElementById('prop-dir').value   = deg.toFixed(1);
-    this._updateDial(deg);
-    this._updateStats(body);
-  }
-  _updateStats(body) {
-    if (!body) return;
-    document.getElementById('stat-speed').textContent = body.speedKms.toFixed(1)+' km/s';
-    document.getElementById('stat-dist').textContent  = body.distAU.toFixed(2)+' AU';
-  }
-
-  // ── Dial ────────────────────────────────────────────────
-  _updateDial(deg) {
-    const needle = document.getElementById('dir-dial-needle');
-    if (!needle) return;
-    const rad = deg * Math.PI / 180;
-    needle.setAttribute('x2', (16 + 13*Math.cos(rad)).toFixed(1));
-    needle.setAttribute('y2', (16 + 13*Math.sin(rad)).toFixed(1));
-  }
-
-  _bindProps() {
-    const getBody = () => this.bodies.find(b => b.id === this.selectedId);
-
-    const applyVelocity = () => {
-      const b = getBody(); if (!b) return;
-      // FIX: use isNaN guard instead of || 0, so partial input (empty string) doesn't snap to 0°
-      const rawSpeed = parseFloat(document.getElementById('prop-speed').value);
-      const rawDir   = parseFloat(document.getElementById('prop-dir').value);
-      const speedKms = isNaN(rawSpeed) ? 0 : rawSpeed;
-      const deg      = isNaN(rawDir)   ? 0 : rawDir;
-      const { vx, vy } = speedDirToVxy(speedKms, deg);
-      b.vx = vx; b.vy = vy;
-      b.clearTrail();
-      this.physics.markDirty();
-      this._updateDial(deg);
-      this._updateStats(b);
-    };
-
-    document.getElementById('prop-name').addEventListener('input', e => { const b = getBody(); if (b) b.name = e.target.value; });
-    document.getElementById('prop-mass').addEventListener('input', e => {
-      const b = getBody(); if (!b) return;
-      const val = parseFloat(e.target.value);
-      if (!isNaN(val) && val > 0) b.mass = displayToMass(val, b.type);
-    });
-    document.getElementById('prop-radius').addEventListener('input', e => {
-      const b = getBody(); if (!b) return;
-      const val = parseFloat(e.target.value);
-      // BUG1 FIX: clamp display radius — huge values (e.g. 6371 typed as km) break gradient rendering
-      if (!isNaN(val) && val > 0) b.radius = Math.max(0.01, Math.min(50, val));
-    });
-    document.getElementById('prop-speed').addEventListener('input', applyVelocity);
-    document.getElementById('prop-dir').addEventListener('input', applyVelocity);
-    document.getElementById('prop-color').addEventListener('input', e => {
-      const b = getBody();
-      if (b) { b.color = e.target.value; document.getElementById('prop-color-hex').textContent = e.target.value; }
-    });
-    document.getElementById('btn-delete-body').addEventListener('click', () => this._deleteSelected());
-
-    // Dial drag
-    const dial = document.getElementById('dir-dial');
-    if (dial) {
-      const onDialMove = (e) => {
-        if (!this._dialDragging) return;
-        const rect = dial.getBoundingClientRect();
-        let deg = Math.atan2(e.clientY - (rect.top + rect.height/2), e.clientX - (rect.left + rect.width/2)) * 180 / Math.PI;
-        if (deg < 0) deg += 360;
-        document.getElementById('prop-dir').value = deg.toFixed(1);
-        applyVelocity();
-      };
-      dial.addEventListener('mousedown', (e) => { this._dialDragging = true; e.preventDefault(); e.stopPropagation(); });
-      window.addEventListener('mousemove', onDialMove);
-      window.addEventListener('mouseup', () => { this._dialDragging = false; });
-    }
-  }
-
   // ─────────────────────────────────────────────────────────
   // DELETE
   // ─────────────────────────────────────────────────────────
@@ -720,6 +659,8 @@ export class UI {
     });
     const slider = document.getElementById('speed-slider');
     const slabel = document.getElementById('speed-label');
+    // Initialise label from current slider value on startup
+    slabel.textContent = this.physics.speedLabel(slider.value);
     slider.addEventListener('input', () => {
       this.physics.setSpeedFromSlider(slider.value);
       slabel.textContent = this.physics.speedLabel(slider.value);
@@ -883,53 +824,18 @@ export class UI {
   // ─────────────────────────────────────────────────────────
   // HUD
   // ─────────────────────────────────────────────────────────
+  // Delegate to HUD sub-controller
   updateHUD(fps, physics) {
     const phys = physics || this.physics;
-    document.getElementById('hud-bodies').textContent = this.bodies.length;
-    document.getElementById('hud-fps').textContent    = Math.round(fps);
-    const yrs = phys.simTime;
-    document.getElementById('hud-time').textContent =
-      yrs < 1 ? (yrs*365.25).toFixed(1)+' d' : yrs < 100 ? yrs.toFixed(1)+' yr' : (yrs/1000).toFixed(2)+' kyr';
-
-    if (this.bodies.length > 1 && phys._initEnergy !== null) {
-      // Smooth energy values with EMA so they don't flicker unreadably
-      const EMA = 0.05; // blending factor — smaller = smoother
-      if (this._hudKE  === undefined) this._hudKE  = phys.kineticEnergy;
-      if (this._hudTE  === undefined) this._hudTE  = phys.totalEnergy;
-      if (this._hudDrift === undefined) this._hudDrift = phys.energyDrift;
-      this._hudKE    = this._hudKE    * (1-EMA) + phys.kineticEnergy   * EMA;
-      this._hudTE    = this._hudTE    * (1-EMA) + phys.totalEnergy     * EMA;
-      this._hudDrift = this._hudDrift * (1-EMA) + phys.energyDrift     * EMA;
-
-      const fmt = v => { const a=Math.abs(v); return a>=1e9?(v/1e9).toFixed(2)+' G':a>=1e6?(v/1e6).toFixed(2)+' M':a>=1e3?(v/1e3).toFixed(2)+' k':v.toFixed(2); };
-      document.getElementById('hud-ke').textContent = fmt(this._hudKE);
-      document.getElementById('hud-te').textContent = fmt(this._hudTE);
-      const drift   = this._hudDrift;
-      const driftEl = document.getElementById('hud-drift');
-      driftEl.textContent  = drift.toFixed(3)+'%';
-      driftEl.dataset.good = Math.abs(drift) < 0.1 ? 'true' : 'false';
-      const seKe = document.getElementById('se-ke');
-      if (seKe) {
-        document.getElementById('se-ke').textContent = fmt(this._hudKE);
-        document.getElementById('se-pe').textContent = fmt(phys.potentialEnergy);
-        document.getElementById('se-te').textContent = fmt(this._hudTE);
-        const sdEl = document.getElementById('se-drift');
-        sdEl.textContent = drift.toFixed(4)+'%';
-        sdEl.style.color = Math.abs(drift)<0.1 ? '#4ade80' : Math.abs(drift)<1 ? '#facc15' : '#f87171';
-      }
-    } else {
-      this._hudKE = undefined; this._hudTE = undefined; this._hudDrift = undefined;
-      ['hud-ke','hud-te','hud-drift'].forEach(id => { const el=document.getElementById(id); if(el) el.textContent='—'; });
-    }
-
+    this.hud.update(this.bodies, phys, fps);
     if (this.selectedId !== null) {
       const b = this.bodies.find(b => b.id === this.selectedId);
-      if (b) this._updateStats(b);
+      if (b) this.propsPanel.updateStats(b);
     }
   }
 
   _updateHint() {
-    const h = document.getElementById('empty-hint');
+    const h = this._dom.emptyHint;
     if (this.bodies.length > 0) h.classList.add('hidden');
     else h.classList.remove('hidden');
   }

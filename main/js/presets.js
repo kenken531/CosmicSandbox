@@ -55,14 +55,15 @@ export const PRESETS = [
     name: 'Figure-8 Orbit',
     desc: 'Chenciner–Montgomery solution (2000). Three equal masses trace a figure-8 forever.',
     bodies: 3,
-    // Scaled from normalized Chenciner-Montgomery with M=300000, G=1.9855e-5
-    // scale = sqrt(G*M) = 2.4399
-    // Normalized positions (Simo 2002): (-1,0),(1,0),(0,0)  at t=0
-    // Normalized velocities: (0.3069,-0.1255) for body1, (0.3069,-0.1255) for body2, (-0.6138,0.2510) for body3
+    // Simo (2002) initial conditions, normalized G=M=1, scaled to our units.
+    // v_scale = sqrt(G * M_each) = sqrt(1.9855e-5 * 300000) = 2.440594
+    // Positions are in AU (length scale = 1 from normalized solution).
+    // Normalized ICs: x1=(-0.97000436, 0.24308753), x2=(0.97000436,-0.24308753), x3=(0,0)
+    // Normalized velocities: v1=v2=(0.93240737/2, 0.86473146/2), v3=(-0.93240737,-0.86473146)
     bodies_data: [
-      { type:'star', x:-1, y:0, vx: 0.749, vy:-0.306, mass:300000, radius:0.14, color:'#FF9050', name:'A' },
-      { type:'star', x: 1, y:0, vx: 0.749, vy:-0.306, mass:300000, radius:0.14, color:'#50C0FF', name:'B' },
-      { type:'star', x: 0, y:0, vx:-1.498, vy: 0.612, mass:300000, radius:0.14, color:'#C050FF', name:'C' },
+      { type:'star', x:-0.970004, y: 0.243088, vx: 1.1378, vy: 1.0552, mass:300000, radius:0.14, color:'#FF9050', name:'A' },
+      { type:'star', x: 0.970004, y:-0.243088, vx: 1.1378, vy: 1.0552, mass:300000, radius:0.14, color:'#50C0FF', name:'B' },
+      { type:'star', x: 0,        y: 0,        vx:-2.2756, vy:-2.1105, mass:300000, radius:0.14, color:'#C050FF', name:'C' },
     ]
   },
 
@@ -72,11 +73,15 @@ export const PRESETS = [
     desc: 'A gas giant with a moon, both orbiting a star. Both orbits stay stable.',
     bodies: 3,
     // Giant at 5 AU: v = sqrt(G*1989000/5) = 2.810 AU/yr
-    // Moon at 0.35 AU from giant: v_giant + sqrt(G*1898/0.35) = 2.810 + 0.328 = 3.138
+    // Hill sphere of giant: r_H = 5*(1898/(3*1989000))^(1/3) = 0.341 AU
+    // Prograde stability limit ≈ 0.5 * r_H = 0.171 AU (Holman & Wiegert 1999)
+    // Moon at 0.15 AU from giant (44% of Hill sphere — safely inside prograde limit)
+    // v_local = sqrt(G*1898/0.15) = 0.501 AU/yr
+    // Moon world v = v_giant + v_local = 2.810 + 0.501 = 3.311 AU/yr
     bodies_data: [
       { type:'star',   x:0,    y:0,  vx:0,    vy:0,     mass:1989000, radius:0.25,   color:'#FFD060', name:'Sun'   },
-      { type:'planet', x:5,    y:0,  vx:0,    vy:2.810, mass:1898,    radius:0.12, color:'#5090D0', name:'Giant' },
-      { type:'planet', x:5.35, y:0,  vx:0,    vy:3.138, mass:6,       radius:0.05,   color:'#AAAACC', name:'Moon'  },
+      { type:'planet', x:5,    y:0,  vx:0,    vy:2.810, mass:1898,    radius:0.12,   color:'#5090D0', name:'Giant' },
+      { type:'planet', x:5.15, y:0,  vx:0,    vy:3.311, mass:6,       radius:0.05,   color:'#AAAACC', name:'Moon'  },
     ]
   },
 
@@ -85,12 +90,12 @@ export const PRESETS = [
     name: 'Gravity Slingshot',
     desc: 'A small body approaches a massive star and is flung away — gravitational assist.',
     bodies: 2,
-    // Traveller starts at (-8,3), moving roughly toward star
-    // escape velocity at r=sqrt(64+9)=8.54 is sqrt(2GM/r)=sqrt(2*1.9855e-5*1989000/8.54)=3.03
-    // Give it v < escape but at an angle to create hyperbolic flyby
+    // Traveller at (-8,3): r=8.544 AU
+    // v_escape at r=8.544: sqrt(2*G*M/r) = 3.040 AU/yr
+    // vx=3.5, vy=-0.4 → v=3.523 (hyperbolic, e=1.053, periapsis≈0.66 AU — close dramatic flyby)
     bodies_data: [
       { type:'star',   x:0,  y:0, vx:0,   vy:0,    mass:1989000, radius:0.25,   color:'#FFD060', name:'Massive Star' },
-      { type:'planet', x:-8, y:3, vx:2.2, vy:-0.4, mass:1,       radius:0.06, color:'#80E0A0', name:'Traveller'    },
+      { type:'planet', x:-8, y:3, vx:3.5, vy:-0.4, mass:1,       radius:0.06, color:'#80E0A0', name:'Traveller'    },
     ]
   },
 
@@ -155,11 +160,18 @@ export const PRESETS = [
     name: 'Black Hole Flyby',
     desc: 'A stellar black hole drifts past a solar system. Watch it warp orbits and spaghettify anything that gets too close.',
     bodies: 4,
+    // BH at (-12,3): r=12.369 AU. v_escape from sun at this distance = 2.527 AU/yr.
+    // BH vx=3.0, vy=0.2 → v=3.007 (hyperbolic w.r.t. Sun, r_periapsis≈1.56 AU)
+    //
+    // CoM correction: BH mass (19890000) >> Sun (1989000), so the raw scene drifts
+    // at CoM_v = M_BH*v_BH / (M_BH+M_Sun) = (2.7273, 0.1818) AU/yr.
+    // Subtract CoM_v from ALL bodies so the scene stays centred.
+    // Orbital velocities are relative to the Sun so they remain correct.
     bodies_data: [
-      { type:'star',      x:0,   y:0,  vx:0,    vy:0,     mass:1989000,  radius:0.25, physicsRadius:0.08,  color:'#FFD060', name:'Sun'    },
-      { type:'planet',    x:1,   y:0,  vx:0,    vy:6.284, mass:6,        radius:0.08, physicsRadius:0.015, color:'#4B8FDE', name:'Earth'  },
-      { type:'planet',    x:2.5, y:0,  vx:0,    vy:3.974, mass:10,       radius:0.10, physicsRadius:0.018, color:'#C88B3A', name:'Jupiter'},
-      { type:'blackhole', x:-12, y:3,  vx:2.5,  vy:0.2,   mass:19890000, radius:0.06, physicsRadius:0.04,  color:'#8B5CF6', name:'Nemesis'},
+      { type:'star',      x:0,   y:0,  vx:-2.7273, vy:-0.1818, mass:1989000,  radius:0.25, physicsRadius:0.08,  color:'#FFD060', name:'Sun'    },
+      { type:'planet',    x:1,   y:0,  vx:-2.7273, vy: 6.1022, mass:6,        radius:0.08, physicsRadius:0.015, color:'#4B8FDE', name:'Earth'  },
+      { type:'planet',    x:2.5, y:0,  vx:-2.7273, vy: 3.7922, mass:10,       radius:0.10, physicsRadius:0.018, color:'#C88B3A', name:'Jupiter'},
+      { type:'blackhole', x:-12, y:3,  vx: 0.2727, vy: 0.0182, mass:19890000, radius:0.06, physicsRadius:0.04,  color:'#8B5CF6', name:'Nemesis'},
     ]
   },
 
@@ -188,7 +200,7 @@ export const PRESETS = [
       { type:'comet', x:0.8,   y:0,   vx:0,    vy:9.6,    mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#A0D4FF', name:'C/2'    },
       { type:'comet', x:-1.0,  y:0,   vx:0,    vy:-8.5,   mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#80C8FF', name:'C/3'    },
       { type:'comet', x:0,     y:0.7, vx:-10.3,vy:0,      mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#B0DCFF', name:'C/4'    },
-      { type:'comet', x:0,    y:-0.5, vx:12.0, vy:0,      mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#90D0FF', name:'C/5'    },
+      { type:'comet', x:0,    y:-0.5, vx:11.5, vy:0,      mass:0.0001,  radius:0.025,physicsRadius:0.008, color:'#90D0FF', name:'C/5'    },
     ]
   },
 

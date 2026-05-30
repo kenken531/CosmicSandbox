@@ -1,18 +1,14 @@
 // physics.js — Velocity Verlet N-body integrator
 //
-// BUG FIXES applied in this version:
-//  1. markDirty() now called from ui.js on every drag/load/clear
-//  2. Substep count capped correctly — uses sqrt(timeScale) not timeScale
-//     to avoid dt blowup at extreme speeds
-//  3. Passthrough mode still records trails and advances simTime
-//  4. Collision blend fraction captured before mass mutation
-//  5. Energy baseline only set on a collision-free step
+// Softened gravity (ε=0.05 AU), adaptive micro-stepping for close approaches
+// and high simulation speeds, momentum-conserving collision merges, and
+// energy-drift tracking for conservation monitoring.
 
 import { SIM } from './bodies/Body.js';
 
 export class Physics {
   constructor() {
-    this.G             = SIM.G;      // 1.9855e-5 AU³ yr⁻² (1e24 kg)⁻¹ (corrected)
+    this.G             = SIM.G;      // 1.9855e-5 AU³ yr⁻² (1e24 kg)⁻¹
     this.softening     = 0.05;        // ε (AU) — prevents singularity
     // Reduced from 0.3: large softening biases gravity at orbital distances (~1 AU),
     // causing slow artificial precession and drift. 0.05 is negligible at ≥0.5 AU.
@@ -33,7 +29,7 @@ export class Physics {
     // Collision events for effects system (cleared each step)
     this.collisionEvents = [];
 
-    // FIX 1: dirty flag — must warm-up acceleration on first step
+    // Dirty flag: recompute accelerations before first Verlet step after any external change
     // and after any external scene change (drag, load, clear)
     this._dirty = true;
   }
@@ -73,36 +69,34 @@ export class Physics {
     const n  = bodies.length;
     const dt = this.dt;
 
-    // FIX 1: warm-up pass — compute real accelerations before first Verlet step
+    // Warm-up pass: compute real accelerations before first Verlet step
     if (this._dirty) {
       this._computeAccel(bodies);
       this._dirty = false;
     }
 
-    // BUG3 FIX: adaptive micro-substeps when bodies are dangerously close
-    // Find minimum separation; if < 2*softening, split this step further
-    let minDist = Infinity;
+    // Adaptive micro-substeps:
+    // 1. Period-based: ensure at least 20 steps per orbit for the tightest pair.
+    //    T = 2π√(r³/GM_total); substeps = ceil(T_orbit / dt * 20)
+    //    This prevents close orbits from being traced as polygons.
+    // 2. Speed-based: scale with timeScale so high-speed simulations stay accurate.
+    let periodSubsteps = 1;
     for (let i = 0; i < n; i++) {
-      for (let j = i+1; j < n; j++) {
+      for (let j = i + 1; j < n; j++) {
         const dx = bodies[j].x - bodies[i].x;
         const dy = bodies[j].y - bodies[i].y;
-        const d  = Math.sqrt(dx*dx + dy*dy);
-        if (d < minDist) minDist = d;
+        const r  = Math.sqrt(dx*dx + dy*dy);
+        if (r < 1e-6) continue;
+        const Mtot = bodies[i].mass + bodies[j].mass;
+        const T    = 2 * Math.PI * Math.sqrt(r * r * r / (this.G * Mtot));
+        const need = Math.ceil(dt / (T / 20));  // substeps to get 20 steps/orbit
+        if (need > periodSubsteps) periodSubsteps = need;
       }
     }
-    // Adaptive micro-substeps:
-    // 1. If bodies are dangerously close, split more finely (close-approach guard)
-    // 2. Always add substeps proportional to timeScale so orbital accuracy is preserved
-    //    at high sim speeds. Target: dt_effective < P_min/20 where P_min is the period
-    //    of the tightest pair. Floor is 1, no hardcoded cap of 8.
-    const closeThreshold = this.softening * 4;
-    const closeSubsteps  = minDist < closeThreshold
-      ? Math.ceil(closeThreshold / Math.max(minDist, 0.001))
-      : 1;
-    // Speed substeps: scale so each substep ≤ baseDt × 2 regardless of timeScale
     const speedSubsteps = Math.max(1, Math.ceil(this.timeScale / 2));
-    const microSteps = Math.min(200, Math.max(closeSubsteps, speedSubsteps));
+    const microSteps = Math.min(200, Math.max(periodSubsteps, speedSubsteps));
     const microDt = dt / microSteps;
+    this.lastMicroSteps = microSteps;  // exposed for HUD display
 
     for (let ms = 0; ms < microSteps; ms++) {
     // Step 1: x(t+dt) = x + v·dt + ½·a·dt²
@@ -146,7 +140,7 @@ export class Physics {
             const totalMass = bi.mass + bj.mass;
             const [survivor, victim] = bi.mass >= bj.mass ? [bi, bj] : [bj, bi];
 
-            // FIX 4: capture blend fraction BEFORE mutating survivor.mass
+            // Capture blend fraction before mutating survivor.mass
             const blendT = victim.mass / totalMass;
 
             this.collisionEvents.push({
@@ -182,6 +176,10 @@ export class Physics {
             // Comets always dissolve into their absorber — no special handling needed
             survivor.color  = blendHex(survivor.color, victim.color, blendT);
 
+            // Re-classify survivor based on new mass+radius — merged planets may become stars, etc.
+            // Import classifyType inline to avoid circular dep — just replicate the logic
+            survivor._reclassifyAfterMerge();
+
             toRemove.add(bodies.indexOf(victim));
             survivor.clearTrail();
             survivor.ax = 0; survivor.ay = 0;
@@ -192,6 +190,7 @@ export class Physics {
 
     // ── Exotic body effects ─────────────────────────────
     for (let i = 0; i < bodies.length; i++) {
+      if (toRemove.has(i)) continue;   // skip victims already marked for removal
       const b = bodies[i];
 
       // Spin animation for neutron stars and pulsars
@@ -235,7 +234,7 @@ export class Physics {
     // ── Energy ───────────────────────────────────────────
     this._computeEnergy(bodies);
 
-    // FIX 5: only set baseline on a collision-free step
+    // Only set energy baseline on a collision-free step
     if (this._initEnergy === null && !hadCollision && n > 1) {
       this._initEnergy = this.totalEnergy;
     }

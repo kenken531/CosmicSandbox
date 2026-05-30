@@ -34,7 +34,7 @@ export class Camera {
   reset() { this.x = 0; this.y = 0; this.zoom = 40; }
 
   // Fit all bodies in view with comfortable padding.
-  // BUG2 FIX: single-body case uses a meaningful default zoom (40 px/AU)
+  // Single-body case: zoom so the body appears ~30px on screen
   // instead of zoom=1 which made everything 1 pixel.
   fitBodies(bodies, canvas) {
     if (bodies.length === 0) { this.reset(); return; }

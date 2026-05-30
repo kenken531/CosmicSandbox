@@ -59,7 +59,6 @@ _bindSimPanel();
 // ── FPS ──────────────────────────────────────────────────
 let lastTime = 0, fps = 60;
 const FPS_SMOOTH = 0.92;
-const MAX_SUBSTEPS = 8;
 
 // ── Game loop ─────────────────────────────────────────────
 function loop(timestamp) {
@@ -67,44 +66,29 @@ function loop(timestamp) {
   lastTime = timestamp;
   if (elapsed > 0) fps = fps * FPS_SMOOTH + (1000 / elapsed) * (1 - FPS_SMOOTH);
 
-  // Physics + sub-stepping
+  // Physics — single step call; all adaptive sub-stepping is handled inside physics.step()
   if (physics.running && bodies.length > 1) {
-    // FIX: use sqrt(timeScale) for substep count — ceil() caused dt blowup at high speeds
-    // e.g. timeScale=100 → substeps=10, dt_per_step = baseDt*100/10 = baseDt*10 (manageable)
-    //      instead of substeps=100 which wastes CPU for no accuracy gain
-    const substeps = physics.timeScale > 2
-      ? Math.min(MAX_SUBSTEPS, Math.ceil(Math.sqrt(physics.timeScale)))
-      : 1;
+    const toRemove = physics.step(bodies);
 
-    const saved = physics.timeScale;
-    physics.timeScale = saved / substeps;
-
-    for (let s = 0; s < substeps; s++) {
-      const toRemove = physics.step(bodies);
-
-      // Spawn collision effects before removing bodies
-      for (const evt of physics.collisionEvents) {
-        effects.spawnCollision(evt, camera, canvas);
-      }
-
-      if (toRemove && toRemove.length > 0) {
-        for (const idx of toRemove) {
-          const removed = bodies.splice(idx, 1)[0];
-          if (ui.selectedId === removed.id) ui.deselect();
-        }
-      }
-      if (bodies.length < 2) break;
+    // Spawn collision effects before removing bodies
+    for (const evt of physics.collisionEvents) {
+      effects.spawnCollision(evt, camera, canvas);
     }
 
-    physics.timeScale = saved;
+    if (toRemove && toRemove.length > 0) {
+      for (const idx of toRemove) {
+        const removed = bodies.splice(idx, 1)[0];
+        if (ui.selectedId === removed.id) ui.deselect();
+      }
+    }
   }
 
   // Update effects
   effects.update();
 
   // Render
-  renderer.render(bodies, camera, ui.selectedId, ui.velArrow);
-  effects.draw(renderer.ctx, camera, canvas);  // FIX: pass camera+canvas for world→screen
+  renderer.render(bodies, camera, ui.selectedId, ui.velArrow, physics);
+  effects.draw(renderer.ctx, camera, canvas);  // world→screen conversion needs both camera and canvas
 
   // Minimap
   if (bodies.length > 0) {
@@ -127,16 +111,38 @@ requestAnimationFrame(loop);
 function _bindSimPanel() {
   const panel = document.getElementById('sim-panel');
 
+  // Declare all controls upfront so the open-handler can sync them from physics state
+  const gSlider    = document.getElementById('sim-g');
+  const gVal       = document.getElementById('sim-g-val');
+  const epsSlider  = document.getElementById('sim-eps');
+  const epsVal     = document.getElementById('sim-eps-val');
+  const trailSlider = document.getElementById('sim-trail');
+  const trailVal   = document.getElementById('sim-trail-val');
+
+  // Initialise labels from live physics values on page load
+  gVal.textContent   = (physics.G / SIM.G).toFixed(2) + '×';
+  epsSlider.value    = physics.softening;
+  epsVal.textContent = physics.softening.toFixed(3) + ' AU';
+
   document.getElementById('btn-settings').addEventListener('click', () => {
+    const opening = panel.classList.contains('hidden');
     panel.classList.toggle('hidden');
+    if (opening) {
+      // Sync all controls from live physics state so displayed values are never stale
+      const gMult = physics.G / SIM.G;
+      gSlider.value     = gMult.toFixed(2);
+      gVal.textContent  = gMult.toFixed(2) + '×';
+      epsSlider.value   = physics.softening;
+      epsVal.textContent = physics.softening.toFixed(3) + ' AU';
+      trailSlider.value = (bodies[0]?.trailMaxLen) || 500;
+      trailVal.textContent = trailSlider.value;
+    }
   });
   document.getElementById('sim-close').addEventListener('click', () => {
     panel.classList.add('hidden');
   });
 
   // G multiplier
-  const gSlider = document.getElementById('sim-g');
-  const gVal    = document.getElementById('sim-g-val');
   gSlider.addEventListener('input', () => {
     const mult = parseFloat(gSlider.value);
     physics.G  = SIM.G * mult;       // always based on canonical G
@@ -145,16 +151,12 @@ function _bindSimPanel() {
   });
 
   // Softening
-  const epsSlider = document.getElementById('sim-eps');
-  const epsVal    = document.getElementById('sim-eps-val');
   epsSlider.addEventListener('input', () => {
     physics.softening = parseFloat(epsSlider.value);
     epsVal.textContent = physics.softening.toFixed(3) + ' AU';
   });
 
   // Trail length
-  const trailSlider = document.getElementById('sim-trail');
-  const trailVal    = document.getElementById('sim-trail-val');
   trailSlider.addEventListener('input', () => {
     const len = parseInt(trailSlider.value);
     trailVal.textContent = len;
