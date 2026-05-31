@@ -1,24 +1,23 @@
-# Cosmic Playground
+# Cosmic Sandbox
 
-A browser-based N-body gravitational simulator. Drag stars, planets, and exotic objects onto a canvas, set their velocities with an interactive arrow, and watch them interact under Newtonian gravity in real time. No installation. No build step. Open `index.html` via any local HTTP server.
+A browser-based N-body gravitational simulator. Place stars, planets, black holes, neutron stars, pulsars, and comets on a canvas. Set their velocities with an interactive drag arrow, watch orbits form in real time, and see what happens when things collide.
 
-![Cosmic Playground screenshot placeholder](docs/screenshot.png)
+No installation. No build step. Open `index.html` via any local HTTP server.
 
 ---
 
 ## Quick Start
 
 ```bash
-# Clone or unzip the project, then serve it over HTTP:
+# Any of these work:
 python -m http.server 8080
-# Open http://localhost:8080 in Chrome or Firefox
+npx serve .
+# Then open http://localhost:8080
 ```
 
-> **Why HTTP?** The project uses ES Modules (`type="module"`). Browsers block module imports over `file://` URLs for security. Any local HTTP server works — Python, Node's `http-server`, VS Code Live Server, etc.
+> **Why HTTP?** The project uses ES Modules (`type="module"`). Browsers block module imports over `file://` for security reasons. Any local HTTP server works — Python, Node's `serve`, VS Code Live Server, etc.
 
-### Direct URL launch
-
-Load a preset directly from the URL:
+### Load a preset directly from the URL
 
 ```
 http://localhost:8080/?scene=solar-system
@@ -26,7 +25,7 @@ http://localhost:8080/?scene=black-hole-flyby
 http://localhost:8080/?scene=figure8
 ```
 
-A full list of scene IDs is in the [Presets](#presets) section.
+All 12 scene IDs are listed in the [Presets](#presets) section.
 
 ---
 
@@ -36,16 +35,13 @@ A full list of scene IDs is in the [Presets](#presets) section.
 
 | Action | Effect |
 |---|---|
-| **Drag** body palette item → canvas | Place a new body |
+| **Drag** body palette icon → canvas | Place a new body |
 | **Click** a body | Select it (opens properties panel) |
-| **Drag** from a body | Draw a velocity arrow — set speed and direction |
-| **Alt + Drag** from a body | Reposition the body |
+| **Drag** from a body, then **release** | Set velocity — release commits the orbit |
+| **Alt + drag** from a body | Reposition the body |
 | **Drag** empty space | Pan the camera |
 | **Middle-click + drag** | Pan the camera |
-| **Scroll wheel** | Zoom in / out (centered on cursor) |
-| **Right-click** | Suppressed (no context menu) |
-
-**Note:** The properties panel only opens on a clean click (mouseup with no drag). Dragging a velocity arrow will never accidentally open the panel.
+| **Scroll wheel** | Zoom in / out, centred on cursor |
 
 ### Keyboard
 
@@ -55,111 +51,117 @@ A full list of scene IDs is in the [Presets](#presets) section.
 | `R` | Re-fit camera to show all bodies |
 | `P` | Open / close Presets modal |
 | `T` | Clear all permanent trails |
-| `C` | Clear all bodies (asks confirmation) |
-| `Delete` / `Backspace` | Delete selected body |
-| `Escape` | Close modal / deselect body |
-| `Ctrl+S` | Save scene as JSON |
+| `C` | Clear all bodies (asks for confirmation) |
+| `Delete` / `Backspace` | Delete the selected body |
+| `Escape` | Close modal / deselect |
+| `Ctrl + S` | Save scene as JSON |
 
 ### Touch (mobile)
 
 | Gesture | Effect |
 |---|---|
 | Tap a body | Select it |
-| Drag from a body | Draw velocity arrow |
+| Drag from a body, release | Set velocity arrow |
 | Drag empty space | Pan |
 | Two-finger pinch | Zoom |
-| Tap palette icon | Place body at canvas center |
+| Tap a palette icon | Place body at canvas centre |
 
 ---
 
-## Interface Layout
+## Interface
 
 ```
-┌──────────────── Topbar ─────────────────────────────────┐
-│ Logo  [▶ Play] [Speed ──●──] [Fit] [Clear] [⚙ Settings] │
-└─────────────────────────────────────────────────────────┘
-┌───────┐ ┌──────────────────────────────┐ ┌──────────────┐
-│       │ │                              │ │              │
-│ Body  │ │          Canvas              │ │  Properties  │
-│Palette│ │      (main simulation)       │ │    Panel     │
-│       │ │                              │ │  (opens on   │
-│ Star  │ │                              │ │  body click) │
-│Planet │ │                              │ │              │
-│  BH   │ └──────────────────────────────┘ └──────────────┘
-│  NS   │          ┌──────────┐
-│Pulsar │          │ Minimap  │ ← overview + scale bar
-│ Comet │          └──────────┘
-└───────┘
-         ┌──────────────────────────────────────────────┐
-         │  HUD: bodies · fps · sim time · KE · TE · Δ% │
-         └──────────────────────────────────────────────┘
+┌──────────────────────── Topbar ────────────────────────────────┐
+│ ◈ COSMIC SANDBOX  [▶ Play] [Speed ──●──] [Fit] [Clear] [⚙]    │
+└────────────────────────────────────────────────────────────────┘
+┌─────────┐  ┌──────────────────────────────┐  ┌───────────────┐
+│         │  │                              │  │               │
+│  Body   │  │         Main Canvas          │  │  Properties   │
+│ Palette │  │      (simulation view)       │  │    Panel      │
+│         │  │                              │  │               │
+│  Star   │  │                              │  │ (opens when   │
+│ Planet  │  │                              │  │  body is      │
+│   BH    │  └──────────────────────────────┘  │  clicked)     │
+│   NS    │                 ┌──────────┐        └───────────────┘
+│ Pulsar  │                 │ Minimap  │ ← scale bar + viewport rect
+│  Comet  │                 └──────────┘
+└─────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  HUD:  bodies · fps · sim time · KE · TE · drift %              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Body Palette (left sidebar)
+### Body Palette
 
-Drag any icon onto the canvas to place that body type. On mobile, tap to place at canvas center.
+Drag any icon onto the canvas to place that body type. On mobile, tap to place at canvas centre. Hovering a body on the canvas changes the cursor to a grab hand — this hints that you can drag to set an orbit. Clicking selects the body.
 
-### Properties Panel (right, opens on selection)
+### Properties Panel
 
-Shows and allows editing of:
+Opens on a clean click (never during a velocity-arrow drag). Shows and allows editing of:
+
 - **Name** — editable text label
-- **Mass** — in solar masses (stars/BH/NS) or Earth masses (planets/comets)
-- **Radius** — display radius in AU
-- **Color** — hex color picker
-- **Speed** — current speed in km/s
-- **Direction** — current velocity direction in degrees, with a drag-dial for adjustment
-- **Live stats** — position (AU), distance from origin, acceleration, KE
+- **Mass** — solar masses for stars / BH / NS; Earth masses for planets / comets
+- **Size** — display radius in AU (0.01 – 50)
+- **Colour** — colour picker + hex readout
+- **Speed** — current speed in km/s (live, read-only)
+- **Direction** — current velocity heading in degrees, with a drag-to-rotate dial
+- **Density** — live `mass / radius³` readout in SI-prefixed units
+- **Class Check** — predicted reclassification in real time. Amber `→ Neutron Star` means the current parameters would reclassify on commit. Hovering shows the exact radius threshold needed
 
-### HUD (bottom bar)
+Reclassification fires when you tab out of or press Enter in the mass or radius field. The body type, name, radius, and renderer all update automatically. A slide-up toast describes the transition.
+
+### HUD
 
 | Field | Description |
 |---|---|
 | Bodies | Current body count |
 | FPS | Frames per second |
 | Sim Time | Elapsed simulation time (days / years / kiloyears) |
-| KE | Kinetic energy (smoothed) |
-| TE | Total mechanical energy (smoothed) |
-| Drift % | Energy conservation error since last reset (green < 0.1%, yellow < 1%, red ≥ 1%) |
+| KE | Kinetic energy, EMA-smoothed (α = 0.05, ~20-frame lag) |
+| TE | Total mechanical energy, smoothed |
+| Drift % | Energy conservation error since last baseline reset (green < 0.1%, yellow < 1%, red ≥ 1%) |
 
-Energy values use an exponential moving average (α = 0.05) to prevent unreadable flickering.
+### Settings Panel (⚙)
 
-### Settings Panel (⚙ button)
+All controls sync from live physics state each time the panel opens — displayed values are never stale.
 
 | Setting | Description |
 |---|---|
-| **Gravitational constant G** | Slider multiplier on canonical G (0.01× – 5×). Weaken or strengthen gravity. |
-| **Softening ε** | Minimum separation in force denominator (AU). Prevents singularities. Default: 0.05 AU. |
-| **Trail length** | Points in the live ring-buffer trail per body (50 – 2000). |
-| **Collision mode** | `merge` (default) or `passthrough`. In passthrough, bodies pass through each other. |
-| **Reset energy baseline** | Re-anchors drift % to current state. Use after manual edits. |
+| **G multiplier** | Scale gravitational constant by 0.01× – 5× |
+| **Softening ε** | Force softening radius in AU. Default 0.05 AU — negligible at ≥ 0.5 AU separations, prevents singularities at close range |
+| **Trail length** | Points in the live ring-buffer trail per body (50 – 2000) |
+| **Collision mode** | `merge` — bodies merge on contact; `passthrough` — bodies pass through each other |
+| **Reset energy baseline** | Re-anchors drift % to current state |
+| **Substeps/Frame** | Live micro-step count. Amber ≥ 20, red ≥ 100 with `⚠` |
 
-### Minimap (bottom-right corner)
+### Minimap
 
-Shows all body positions and orbital trails at a global scale. The blue rectangle shows the current viewport. A **scale bar** above the viewport rectangle auto-selects the best round number (0.1, 0.5, 1, 2, 5 AU…) that fits the minimap's current scale.
+Bottom-right corner overview. The blue rectangle is the current viewport. A **scale bar** above the rectangle auto-selects the cleanest round number (0.1, 0.5, 1, 2, 5 AU…) for the current zoom. Trails are drawn at reduced density (max 80 segments per body) to keep the minimap responsive.
 
 ---
 
 ## Velocity Arrow
 
-When you **drag** from any body, a velocity arrow appears:
+Drag from any body to set its velocity, then release to commit:
 
-- The arrow's **length and direction** map directly to velocity.
-- At default zoom (40 px/AU), a 100 px drag produces ≈ 6.25 AU/yr ≈ 30 km/s — approximately Earth's orbital speed. The feel is intentionally calibrated so a comfortable drag gets you to a real orbit.
-- A **dashed predicted path** trace is drawn in real time, forward-integrating ~300 steps using only the dominant attractor. It shows where the body will go if released now.
-  - Blue trace = bound elliptic orbit
-  - Red trace = hyperbolic / escape trajectory
-  - Green trace = circular or near-circular orbit
-- An **orbit preview ring** around the dominant attractor shows what radius the current speed corresponds to for a circular orbit, color-coded the same way.
-- An orbit-type label (`ELLIPTIC`, `CIRCULAR`, `SUPER-CIRC`, `HYPERBOLIC`) appears near the ring.
+- Arrow **length and direction** map directly to speed and heading
+- At default zoom (40 px/AU), a 100 px drag ≈ 6.25 AU/yr ≈ 29.6 km/s — roughly Earth's orbital speed
+- **Release commits.** Releasing within 5 px of the body discards the arrow
+- A **dashed predicted path** forward-integrates ~500 steps with Velocity Verlet against the dominant attractor
+  - Blue = bound elliptic orbit
+  - Red = hyperbolic / escape trajectory  
+  - Green = circular or snapped to circular
+- An **orbit preview ring** around the dominant attractor marks the circular orbit radius for the current speed
 
 ### Circular Orbit Snap
 
-When the arrow speed is within **5% of the circular orbit velocity** for the dominant attractor, the velocity snaps to exactly circular:
-- The direction snaps perpendicular to the radius vector (prograde or retrograde, whichever matches your drag direction).
-- The speed snaps to exactly `√(GM/r)`.
-- The arrow turns **bright green** and a **⊙ CIRCULAR LOCK** label appears.
+When arrow speed is within 5% of circular velocity `√(GM/r)` for the dominant attractor:
 
-This makes it trivial to place a planet in a stable orbit.
+- Velocity snaps to exactly `√(GM/r)`, direction perpendicular to radius (prograde or retrograde per drag direction)
+- Arrow turns bright green, `⊙ CIRCULAR LOCK` label appears
+- Predicted trace turns green
+
+The snap uses the live G from Settings, so it remains correct if you have changed the G multiplier.
 
 ---
 
@@ -167,70 +169,90 @@ This makes it trivial to place a planet in a stable orbit.
 
 | Type | Default Mass | Collision Radius | Visual |
 |---|---|---|---|
-| **Star** | 1,989,000 units (1 M☉) | 0.08 AU | Radial gradient with temperature glow halos |
-| **Planet** | 6 units (1 M⊕) | 0.015 AU | Sphere with surface bands, terminator shadow, spaghettification stretch |
-| **Black Hole** | 19,890,000 units (10 M☉) | 0.04 AU | Black disc, animated accretion disk (two counter-rotating ellipses), photon sphere ring |
-| **Neutron Star** | 2,785,000 units (1.4 M☉) | 0.02 AU | Bright white-blue core, equatorial bulge ring, spin animation |
-| **Pulsar** | 2,785,000 units (1.4 M☉) | 0.02 AU | Same as neutron star + two sweeping beam jets |
-| **Comet** | 0.0001 units | 0.008 AU | Nucleus + coma halo that grows near massive bodies |
+| **Star** | 1 M☉ (1,989,000 units) | 0.08 AU | Radial gradient, multi-layer glow halos |
+| **Planet** | 1 M⊕ (6 units) | 0.015 AU | Surface bands, terminator shadow, spaghettification stretch |
+| **Black Hole** | 10 M☉ | 0.04 AU | Black disc, animated dual accretion disk, photon sphere ring |
+| **Neutron Star** | 1.4 M☉ | 0.02 AU | Bright white-blue core, equatorial bulge, spin animation |
+| **Pulsar** | 1.4 M☉ | 0.02 AU | Neutron star + two sweeping radiation beam jets |
+| **Comet** | ~10⁻⁷ M⊕ | 0.008 AU | Nucleus + coma halo that grows within 3 AU of any massive body |
 
-### Special Effects
+### Special Visual Effects
 
-- **Spaghettification**: Planets near a black hole stretch visually along the tidal axis. Intensity is `clamp(1 - (r - r_tidal) / (r_tidal × 2), 0, 1)`.
-- **Comet coma**: Intensity = `clamp((3 - d_nearest_massive) / 2.5, 0, 1)`. Full coma inside 0.5 AU.
-- **Pulsar beams**: Sweep at `4.5 deg/frame`. The beam length is `9 × screen_radius`.
-- **Black hole disk**: Two accretion disk ellipses rotate at `0.02 rad/frame` and `0.014 rad/frame`.
+**Spaghettification** — planets near a black hole stretch along the tidal axis. Intensity `= clamp(1 − (r − r_tidal) / (2·r_tidal), 0, 1)` where `r_tidal = physicsRadius × (M_BH/M_body)^(1/3)`.
+
+**Pulsar beams** — two jets sweep at 4.5°/frame. Beam length scales with screen radius.
+
+**BH accretion disk** — two counter-rotating ellipses phase at 0.020 and 0.014 rad/frame, giving an asymmetric shimmer.
+
+**Comet coma** — `intensity = clamp((3 − d_nearest_massive) / 2.5, 0, 1)`. Full coma inside 0.5 AU, zero beyond 3 AU.
 
 ### Collision Merging
 
-When two bodies' `physicsRadius` values overlap:
-- Momentum is conserved: `v_new = (m₁v₁ + m₂v₂) / (m₁ + m₂)`
-- Radius is volume-conserved: `r_new = ∛(r₁³ + r₂³)`
-- Color blends weighted by victim mass fraction
-- Type hierarchy: `blackhole > neutronstar/pulsar > star > planet/comet`
-- A collision flash, two shockwave rings, debris particles, and a floating `✦ MERGE` label are spawned
+When `dist < physicsRadius_A + physicsRadius_B`:
 
-**Note:** `physicsRadius` (collision) and `radius` (display) are intentionally separate. A star's display radius of 0.25 AU would cause instant merges at orbital distances; its collision radius is only 0.08 AU.
+1. Momentum conserved: `v_new = (m₁v₁ + m₂v₂) / (m₁ + m₂)`
+2. Radius volume-conserved: `r_new = ∛(r_A³ + r_B³)`
+3. Colour blends weighted by victim mass fraction
+4. Type hierarchy applied: `blackhole > neutronstar/pulsar > star > planet > comet`
+5. Survivor reclassified — merged planets that cross the stellar mass threshold become stars
+6. Collision flash, two shockwave rings, debris particles, and a floating `✦ MERGE` label spawn
+
+---
+
+## Auto-Classification
+
+Mass and display radius together determine body type. Editing mass or radius in the properties panel and committing (blur / Enter) triggers iterative classification:
+
+```
+mass < 0.5 units                                          → comet
+mass < 24,000 units  (≈ 13 M_Jupiter)                    → planet
+(mass > 4.57×10⁶ AND ρ_display > 10⁹) OR ρ > 10¹³       → black hole
+ρ_display > 5×10⁸  AND  mass ∈ [2.18×10⁶, 4.57×10⁶]     → neutron star
+otherwise                                                  → star
+```
+
+`ρ_display = mass / radius³` — this is a **display density proxy**, not physical density. It is calibrated against the default body radii in `BODY_DEFAULTS`.
+
+The iteration updates the display radius to the new type's default at each step (only if the radius is still at the old type's default). This ensures a planet raised to stellar mass becomes a star with star-sized visuals, not an impossibly dense micro-object.
+
+**Pulsar** is never auto-assigned — it is the same mass/density range as a neutron star, distinguished by spin. An existing pulsar stays a pulsar through edits as long as it stays within the NS mass range.
 
 ---
 
 ## Presets
 
-Load via the **P** key or the Presets button. All 12 presets can also be loaded via URL `?scene=<id>`.
+Load with **P**, the Presets button, or `?scene=<id>` in the URL.
 
-| Name | ID | Bodies | Description |
+| Name | ID | Bodies | Key Physics |
 |---|---|---|---|
-| Solar System | `solar-system` | 4 | Sun + Earth + Mars + Jupiter in stable circular orbits |
-| Binary Stars | `binary-stars` | 2 | Two equal stars in mutual circular orbit |
-| Chaotic Three-Body | `three-body` | 3 | Equilateral triangle — begins periodic, becomes chaotic |
-| Figure-8 Orbit | `figure8` | 3 | Chenciner–Montgomery choreography (2000) |
-| Planet + Moon | `planet-moon` | 3 | Gas giant with moon, both orbiting a star |
-| Gravity Slingshot | `slingshot` | 2 | Hyperbolic flyby — gravitational assist |
-| Galactic Collision | `galactic-collision` | 14 | Two star clusters on collision course |
-| Rogue Planet | `rogue-planet` | 4 | Interloper disrupts a solar system |
-| Black Hole Flyby | `black-hole-flyby` | 4 | 10 M☉ black hole on hyperbolic trajectory |
-| Pulsar System | `pulsar-system` | 3 | Two planets orbiting a millisecond pulsar |
-| Comet Storm | `comet-storm` | 6 | Five comets on bound elliptic orbits around a star |
-| Neutron Star Binary | `neutron-binary` | 2 | Two neutron stars in mutual orbit |
-
-All preset velocities satisfy the vis-viva equation `v = √(GM(2/r − 1/a))` using `G = 1.9855×10⁻⁵`.
+| Solar System | `solar-system` | 4 | Circular orbits via `v = √(GM/r)`; Earth, Mars, Jupiter |
+| Binary Stars | `binary-stars` | 2 | Equal-mass pair, `v = √(GM/4r)` two-body circular |
+| Chaotic Three-Body | `three-body` | 3 | Equilateral triangle; starts near-periodic, becomes chaotic |
+| Figure-8 Orbit | `figure8` | 3 | Chenciner–Montgomery choreography (Simo 2002 initial conditions, zero net momentum) |
+| Planet + Moon | `planet-moon` | 3 | Moon at 44% of Hill sphere, inside Holman–Wiegert prograde stability limit |
+| Gravity Slingshot | `slingshot` | 2 | Hyperbolic flyby, eccentricity 1.053, periapsis 0.66 AU |
+| Galactic Collision | `galactic-collision` | 14 | Two clusters, zero net CoM momentum, counter-drifting at ±0.8 AU/yr |
+| Rogue Planet | `rogue-planet` | 4 | Hyperbolic interloper, periapsis 0.61 AU |
+| Black Hole Flyby | `black-hole-flyby` | 4 | CoM-corrected: all bodies in zero-momentum frame so scene stays centred |
+| Pulsar System | `pulsar-system` | 3 | Two planets on circular orbits around a 1.4 M☉ pulsar |
+| Comet Storm | `comet-storm` | 6 | Five bound comets, all ≥ 8% below escape velocity |
+| Neutron Star Binary | `neutron-binary` | 2 | Two 1.4 M☉ neutron stars, gravitational wave source analogue |
 
 ---
 
-## Save / Load
+## Save & Load
 
-- **Ctrl+S** or the Save button: downloads `cosmic-scene.json`
-- **Load button**: opens a file picker; accepts `.json` files previously saved from this app
-- Saved format (version 2):
+**Ctrl+S** or the Save button downloads `cosmic-scene.json`. The Load button opens a file picker.
 
 ```json
 {
   "version": 2,
-  "simTime": 3.14,
-  "camera": { "x": 0, "y": 0, "zoom": 40 },
+  "simTime": 12.5,
+  "camera": { "x": 0.0, "y": 0.0, "zoom": 40 },
   "bodies": [
     {
-      "type": "star", "x": 0, "y": 0, "vx": 0, "vy": 0,
+      "type": "star",
+      "x": 0, "y": 0, "vx": 0, "vy": 0,
       "mass": 1989000, "radius": 0.25, "physicsRadius": 0.08,
       "color": "#FFD060", "name": "Sol"
     }
@@ -244,192 +266,168 @@ All preset velocities satisfy the vis-viva equation `v = √(GM(2/r − 1/a))` u
 
 ### Unit System
 
-All simulation math uses a consistent unit system defined in `js/bodies/Body.js` (`SIM` object — single source of truth). **Never hardcode raw SI values.**
+Defined in `js/bodies/Body.js` (`SIM` object — single source of truth). Never hardcode raw SI values.
 
 | Quantity | Unit | SI Equivalent |
 |---|---|---|
 | Distance | AU | 1 AU = 1.496 × 10¹¹ m |
-| Mass | 1e24 kg | Earth = 6, Sun = 1,989,000 |
+| Mass | 10²⁴ kg | Earth = 6, Sun = 1,989,000 |
 | Time | year | 1 yr = 3.156 × 10⁷ s |
 | Velocity | AU/yr | **1 AU/yr = 4.740 km/s** |
-| G | AU³ yr⁻² (1e24 kg)⁻¹ | **1.9855 × 10⁻⁵** |
+| G | AU³ yr⁻² (10²⁴ kg)⁻¹ | **1.9855 × 10⁻⁵** |
 
-**Sanity check:** `v_Earth = √(G × M_Sun / 1 AU) = √(1.9855e-5 × 1,989,000) = 6.284 AU/yr = 29.79 km/s` ✓
+Sanity check: `v_Earth = √(1.9855e-5 × 1,989,000 / 1 AU) = 6.284 AU/yr = 29.79 km/s` ✓
 
-### Integrator — Velocity Verlet
+### Velocity Verlet Integration
 
-Each frame, for each body:
-
-```
-1.  x(t+dt) = x + v·dt + ½·a·dt²        (position update using old acceleration)
-2.  a(t+dt) = Σ G·mⱼ·(rⱼ-rᵢ) / |r|³    (recompute pairwise forces at new positions)
-3.  v(t+dt) = v + ½·(a_old + a_new)·dt   (velocity update using average acceleration)
-```
-
-Velocity Verlet is symplectic — it conserves energy much better than Euler over long runs. The energy drift display in the HUD directly measures this: green (< 0.1%) means the integrator is behaving well.
-
-### Gravitational Force
+Per micro-step:
 
 ```
-F_ij = G · mᵢ · mⱼ · (rⱼ - rᵢ) / (|r|² + ε²)^(3/2)
+1.  x(t+dt) = x + v·dt + ½·a·dt²
+2.  a(t+dt) = Σ G·mⱼ·(rⱼ−rᵢ) / (|r|² + ε²)^(3/2)    (recomputed at new positions)
+3.  v(t+dt) = v + ½·(a_old + a_new)·dt
 ```
 
-The softening parameter `ε = 0.05 AU` prevents the force from diverging when bodies get very close. It is small enough to be negligible at typical orbital separations (≥ 0.5 AU) but avoids unphysical velocity spikes at close range.
+Velocity Verlet is symplectic — it preserves phase-space volume and conserves energy far better than Euler over long runs. Well-configured orbits show < 0.1% energy drift over thousands of revolutions.
+
+### Softened Gravity
+
+```
+F_ij = G · mᵢ · mⱼ · (rⱼ − rᵢ) / (|r|² + ε²)^(3/2)
+```
+
+Softening `ε = 0.05 AU` prevents force divergence at very close range. At r = 1 AU, gravity is only 0.4% weaker than exact Newtonian. At r = 0.5 AU, 1.5%. At r = 0.1 AU, 28% — but adaptive micro-stepping keeps bodies from reaching such separations without many substeps.
 
 ### Adaptive Micro-Stepping
 
-Two conditions trigger sub-dividing `dt` within a single frame:
+Each frame, `physics.step()` selects the micro-step count from two criteria:
 
-1. **Close approach**: when the nearest pair is within `4ε = 0.2 AU`, steps are split by `ceil(0.2 / max(dist, 0.001))`
-2. **High simulation speed**: `speedSubsteps = ceil(timeScale / 2)` ensures `dt_effective ≤ baseDt × 2 = 0.033 yr` regardless of the speed slider
+**Period-based** — for every body pair, `T = 2π √(r³ / GM_total)`. Substeps needed for 20 integration points per orbit: `⌈dt / (T/20)⌉`. This prevents close orbits from being traced as polygons. A planet at 0.1 AU from a Sun-mass star (period = 11.5 days) requires ~11 substeps at timeScale = 1.
 
-Both are combined: `microSteps = max(closeSubsteps, speedSubsteps)`, capped at 200 to prevent frame stalls. Trail recording only happens on the final micro-step to keep trail density constant.
+**Speed-based** — `⌈timeScale / 2⌉`, keeping each substep's effective dt ≤ `baseDt × 2 = 0.033 yr`.
 
-### Dirty Flag
+Final: `min(200, max(period_substeps, speed_substeps))`. The **Substeps/Frame** counter in Settings shows this live.
 
-`physics.markDirty()` **must** be called after any external change to body positions or velocities (drag-reposition, preset load, vel-arrow commit, clear). On the next step it recomputes accelerations from scratch before the first Verlet advance. Skipping this causes a velocity kick from stale `ax = ay = 0`.
+**Performance note:** At timeScale = 100 with 20 bodies, 50 substeps × 190 force pairs = 9,500 force evaluations per frame. Expect < 60 fps in this regime. The O(n²) force loop is the bottleneck; Barnes-Hut is not implemented.
 
-This is called automatically by all paths in `ui.js` that mutate body state.
+### Collision Detection
+
+Uses `physicsRadius` (not display `radius`). On overlap:
+
+- Momentum conserved
+- Radius volume-conserved
+- Type hierarchy: BH > NS/Pulsar > Star > Planet > Comet
+- Post-merge reclassification via `_reclassifyAfterMerge()`
 
 ### Energy Tracking
 
-KE + PE are computed every step:
-
 ```
 KE = Σ ½ mᵢ |vᵢ|²
-PE = -Σᵢ<ⱼ G mᵢ mⱼ / √(|rᵢ - rⱼ|² + ε²)
+PE = −Σᵢ<ⱼ G mᵢ mⱼ / √(|rᵢ − rⱼ|² + ε²)
+drift = (E_now − E_init) / |E_init| × 100%
 ```
 
-`energyDrift = (E_now - E_init) / |E_init| × 100%`
-
-The baseline `E_init` resets after collisions or `markDirty()` calls. The HUD shows the EMA-smoothed drift so it's readable.
+Baseline resets after collisions or `markDirty()`. HUD values are EMA-smoothed (α = 0.05) to remain readable at any simulation speed.
 
 ---
 
-## Rendering Pipeline
+## File Structure
 
-Each frame in order (`renderer.js`):
+```
+index.html              UI shell — topbar, sidebar, canvas, panels, modals
+style.css               Dark space theme, CSS variables, responsive ≤800px / ≤480px
 
-1. **Starfield blit** — static offscreen canvas (nebula wisps + three star-size classes with color temperatures), rebuilt only on resize
-2. **Permanent trails** — full orbit history (opacity 0.18, line 0.8px)
-3. **Live trails** — ring-buffer trail split into 4 opacity bands (newest = brightest), with jump-detection to break paths at ring-buffer wrap points (prevents the "diagonal teleport line" artifact)
-4. **Glow halos** — per-body radial gradient layers (different intensity profiles per type)
-5. **Bodies** — type-specific draw methods (star, planet, blackhole, neutronstar, pulsar, comet)
-6. **Velocity arrow overlay** — only when dragging; includes predicted path trace, orbit ring, orbit-type label, snap indicator
-7. **Effects** — collision flashes, shockwave rings, debris particles, floating labels (drawn by `effects.js`, world-space positions converted to screen each frame)
+js/
+  main.js          (184)  Game loop, resize, URL ?scene= handler, settings panel binding
+  camera.js         (74)  worldToScreen / screenToWorld, pan, zoom, fitBodies
+  physics.js        (286) Velocity Verlet, adaptive substeps, collisions, energy
+  renderer.js       (699) Canvas pipeline, starfield, trails, glows, body types, vel-arrow
+  minimap.js        (125) Overview canvas, LOD trail rendering, scale bar
+  effects.js        (168) Collision flash, shockwave rings, debris particles, floating labels
+  ui.js             (842) Drag state machine, selection, toolbar, keyboard, touch events
+  hud.js             (86) Per-frame energy / fps display with EMA smoothing
+  props-panel.js    (272) Properties sidebar — fields, dial, reclassification, toast
+  presets.js        (217) 12 scenario definitions (pure data, no DOM)
+  bodies/
+    Body.js         (248) Body class, SIM constants, hexRgb, classifyType, trail ring buffer
+```
 
-### Trail Jump Detection
-
-The live trail is a ring buffer of 500 points. When it wraps, consecutive points can be far apart in world space (the oldest point gets overwritten by a new position elsewhere on the orbit). Without correction, this produces a bright diagonal line across the canvas. The fix: if two consecutive trail world-points are more than 2 AU apart, the canvas path is committed and restarted.
-
----
-
-## Architecture
+### Module Dependency Graph
 
 ```
 index.html
-└── js/main.js          Game loop (requestAnimationFrame), wires all modules
-    ├── js/camera.js    World↔screen transforms, pan, zoom, fitBodies
-    ├── js/physics.js   Velocity Verlet integrator, collision detection, energy
-    ├── js/renderer.js  Canvas draw pipeline (imports SIM from Body.js)
-    ├── js/minimap.js   Overview canvas, scale bar
-    ├── js/effects.js   Collision particles, shockwaves, floating labels
-    ├── js/ui.js        All DOM events, drag state machine, props panel, HUD
-    │   └── js/presets.js   12 built-in scenario definitions (pure data)
-    └── js/bodies/Body.js   Body class + SIM constants (single source of truth)
+└── main.js
+    ├── camera.js
+    ├── physics.js
+    ├── renderer.js   ← imports SIM, hexRgb from Body.js
+    ├── minimap.js    ← imports hexRgb from Body.js
+    ├── effects.js    ← imports hexRgb from Body.js
+    ├── ui.js
+    │   ├── presets.js
+    │   ├── props-panel.js  ← imports SIM, classifyType from Body.js
+    │   └── hud.js
+    └── bodies/Body.js      ← SIM constants, hexRgb, classifyType (shared by all)
 ```
 
-Pure vanilla JS, ES Modules. No framework, no bundler, no dependencies. Google Fonts (Orbitron + Space Mono) from CDN.
-
-### Drag State Machine (`ui.js`)
-
-A single `_dragMode` string — never two flags simultaneously:
-
-| Mode | Trigger | Effect |
-|---|---|---|
-| `none` | Default | — |
-| `pending-body` | Mousedown on a body | Waits for 8 px movement threshold |
-| `vel` | >8 px drag from body (no Alt) | Draws velocity arrow |
-| `body` | >8 px drag from body + Alt | Repositions body in world space |
-| `pan` | Mousedown on empty space or middle-click | Pans camera |
-
-Props panel opens **only on mouseup** after a pure click (`pending-body` → no drag). This ensures dragging a velocity arrow never accidentally opens the panel and shifts the canvas.
-
----
-
-## Performance
-
-| Bodies | Expected FPS | Notes |
-|---|---|---|
-| 1–20 | 60 fps | No issues |
-| 20–80 | 55–60 fps | Trail rendering starts to matter |
-| 80–120 | 40–55 fps | O(n²) force loop becomes visible |
-| 120+ | < 40 fps | Barnes-Hut would be needed |
-
-**Bottlenecks:**
-- Force computation: O(n²) pairwise loop in `physics._computeAccel()`
-- Trail rendering: O(bodies × trail_length) `lineTo` calls per frame — the minimap applies LOD (max 80 segments per body regardless of trail length)
-
-**Not yet implemented:** Barnes-Hut tree (O(n log n)), OffscreenCanvas for trails, WebGL renderer.
+No circular dependencies. Pure ES Modules, no bundler required.
 
 ---
 
 ## Deployment
 
-No build step required. Works on any static host:
+No build step required.
 
 ```bash
-# GitHub Pages: push repo root, enable Pages on main branch
-# Netlify / Vercel: drag-drop the project folder
-# Local: python -m http.server 8080
+# GitHub Pages  — push repo root, enable Pages on main branch
+# Netlify       — drag-drop the project folder
+# Vercel        — import from git, zero configuration
+# Local         — python -m http.server 8080
 ```
-
-The only constraint: files must be served over HTTP (not `file://`) due to ES Module CORS restrictions.
 
 ---
 
 ## Known Limitations
 
-- **Mobile layout** is functional but not fully optimized for very small screens (< 400px)
-- **No URL-based scene sharing** — save/load works locally (JSON download/upload) but there is no server-side storage
-- **No Barnes-Hut** — force computation is O(n²); past ~80–100 bodies at 60 fps on modern hardware, fps drops
-- **No WebGL** — Canvas 2D only; glow and trail rendering is CPU-bound at high body counts
-- **Touch drag-to-place** from palette is not implemented — tap-to-center is the mobile alternative
+- **O(n²) force loop** — comfortable to ~80 bodies at timeScale = 1. Past that, fps drops. Barnes-Hut (O(n log n)) is not implemented
+- **Single-attractor predicted trace** — the vel-arrow path preview uses only the most massive body. In multi-star systems the trace can be misleading
+- **Softening at sub-0.1 AU separations** — gravity is reduced by up to 28% at 0.1 AU. Orbits remain stable via micro-stepping, but forces are not exactly Newtonian at very close range
+- **No server-side storage** — save/load works via local JSON download/upload only. No URL-based scene sharing
+- **Mobile layout** — functional below 800px but not optimised for very small screens (< 400px)
+- **No undo** — a single-level Ctrl+Z for vel-arrow commits, body placements, and deletions is not yet implemented
 
 ---
 
-## Common Pitfalls for Contributors
+## Contributor Notes
 
-1. **Never auto-fit on every body placement.** `fitBodies()` only fires when `bodies.length === 1`. Re-fitting on every drop causes jarring zoom jumps. This was a fixed bug — do not revert.
+### Critical invariants — never break these
 
-2. **Always call `physics.markDirty()`** after any external change to body positions or velocities (drag, preset load, clear, vel-arrow commit). Without it, the first Verlet step uses stale zero accelerations and imparts a velocity kick.
+**1. `physics.markDirty()`** must be called after every external change to body positions or velocities: drag, preset load, vel-arrow commit, clear. Without it the first Verlet step uses stale zero accelerations and kicks all bodies.
 
-3. **`physicsRadius` ≠ `radius`.** These are intentionally separate. `radius` can be 0.25 AU for a star visually; `physicsRadius` must be 0.08 AU so Earth at 1 AU is not inside the collision zone.
+**2. `physicsRadius` ≠ `radius`.** `radius` is the display size. `physicsRadius` is the collision detection radius. They are intentionally separate. Merging them causes instant collisions at orbital distances.
 
-4. **`SIM.velUnit = 4.740`**, not 29.78. The value 29.78 km/s is Earth's speed, not the unit conversion factor. `1 AU/yr = 4.740 km/s`.
+**3. `SIM.G = 1.9855e-5`** is the canonical constant. Never hardcode another value. The G-multiplier slider scales from this: `physics.G = SIM.G × mult`. Both the vel-arrow snap and orbit preview ring use `physics.G` (live), not `SIM.G`.
 
-5. **`SIM.G = 1.9855e-5`** is the canonical value in `Body.js`. Never hardcode a different value anywhere — including in `presets.js` IIFEs or inline calculations.
+**4. `SIM.velUnit = 4.740`** — 1 AU/yr in km/s. The value 29.78 km/s is Earth's orbital speed, not the conversion factor.
 
-6. **Canvas resize must be triggered when props panel opens/closes.** The panel shifts the canvas container width via CSS. `renderer.resize()` is called via `requestAnimationFrame` in `_openPropsPanel()` and `_closePropsPanel()` to keep `canvas.width` in sync. Without this, `camera.worldToScreen()` uses the wrong canvas center and body drops land in the wrong place.
+**5. Auto-fit fires only on the first body** (`bodies.length === 1`). Never call `fitBodies()` on every body placement.
 
-7. **SENSITIVITY = 2.5 must match in both `ui.js` and `renderer.js`.** This constant converts `(screen_pixels / zoom)` → `AU/yr` for the velocity arrow. If they differ, the speed label shown during drag will not match the velocity that actually gets committed.
+**6. Classification thresholds are calibrated against display radii.** If `BODY_DEFAULTS` radii change, `classifyType` thresholds must be recalibrated to match.
 
-8. **Trail jump threshold = 2 AU (squared: 4.0).** This is the world-space distance above which the renderer breaks the trail path to prevent wrap artifacts. If you change `trailMaxLen` substantially, reconsider this threshold.
+**7. `_bindSimPanel` syncs from `physics.*`**, not HTML attribute defaults. Every slider label is set from live state when the panel opens.
 
----
+### Adding a new preset
 
-## File Reference
+1. Add an entry to `PRESETS` in `js/presets.js` with a unique kebab-case `id`
+2. Compute all velocities from `v = √(GM/r)` or vis-viva, using `G = 1.9855e-5`
+3. Verify total centre-of-mass momentum is zero: `Σ mᵢvᵢ = 0`
+4. For moon systems: place the moon at ≤ 50% of the Hill sphere `r_H = a × (m_moon / 3M_star)^(1/3)` to stay within the prograde stability limit
+5. For flyby presets with a massive interloper: subtract the scene CoM velocity from all bodies so the scene stays centred
 
-| File | Lines | Purpose |
-|---|---|---|
-| `index.html` | — | Full UI shell: topbar, sidebar, canvas, props panel, modals |
-| `style.css` | — | Dark space theme, CSS variables, responsive layout (≤ 800px, ≤ 480px) |
-| `js/main.js` | 182 | `requestAnimationFrame` game loop, substep scheduling, URL param handling |
-| `js/camera.js` | 74 | `worldToScreen`, `screenToWorld`, `zoomAt`, `fitBodies` |
-| `js/physics.js` | 287 | Velocity Verlet, softened gravity, adaptive micro-stepping, collision merging, energy |
-| `js/renderer.js` | 721 | Full canvas draw pipeline: starfield, trails, glows, body types, vel arrow |
-| `js/minimap.js` | 125 | Overview canvas with LOD trails, viewport rect, scale bar |
-| `js/effects.js` | 172 | Collision flash, shockwave rings, debris particles, floating text labels |
-| `js/ui.js` | 936 | DOM events, drag state machine, props panel, HUD, keyboard shortcuts, touch |
-| `js/presets.js` | 205 | 12 scenario definitions (pure data) |
-| `js/bodies/Body.js` | 123 | `Body` class, `SIM` constants, trail ring buffer, `toJSON` / `fromJSON` |
+### Adding a new body type
+
+1. Add a `BODY_DEFAULTS` entry in `Body.js`
+2. Add a draw method in `renderer.js` and route to it in `_drawBody`
+3. Update `glowMap` in `_drawGlow`
+4. Handle the type in the collision hierarchy block in `physics.js`
+5. Update `classifyType` if the type should be auto-assigned
+6. Add a palette item in `index.html` and CSS icon in `style.css`
