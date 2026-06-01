@@ -1,6 +1,6 @@
 // ui.js — interaction layer
 
-import { Body, SIM, classifyType } from './bodies/Body.js';
+import { Body, SIM, classifyType, STELLAR_TYPES, M_EARTH, M_SUN, massToDisplay, displayToMass } from './bodies/Body.js';
 import { PRESETS } from './presets.js';
 import { PropsPanel } from './props-panel.js';
 import { HUD } from './hud.js';
@@ -8,32 +8,15 @@ import { HUD } from './hud.js';
 // ── Helpers ───────────────────────────────────────────────
 function vxyToSpeedDir(vx, vy) {
   const speedAUyr = Math.sqrt(vx*vx + vy*vy);
-  const speedKms  = speedAUyr * SIM.velUnit;
   let deg = Math.atan2(vy, vx) * 180 / Math.PI;
   if (deg < 0) deg += 360;
-  return { speedKms, deg };
+  return { speedKms: speedAUyr * SIM.velUnit, deg };
 }
 
 function speedDirToVxy(speedKms, deg) {
   const speedAUyr = speedKms / SIM.velUnit;
   const rad = deg * Math.PI / 180;
   return { vx: speedAUyr * Math.cos(rad), vy: speedAUyr * Math.sin(rad) };
-}
-
-// Mass display helpers
-// Planets/comets: Earth masses (1 M⊕ = 6 units)
-// Stars/BH/NS/Pulsars: Solar masses (1 M☉ = 1,989,000 units)
-const STELLAR_TYPES = new Set(['star','blackhole','neutronstar','pulsar']);
-const M_EARTH  = 6;
-const M_SUN    = 1989000;
-
-function massToDisplay(body) {
-  if (STELLAR_TYPES.has(body.type)) return { val: body.mass / M_SUN,    unit: 'M☉ (solar masses)' };
-  return                                   { val: body.mass / M_EARTH,  unit: 'M⊕ (Earth masses)' };
-}
-function displayToMass(val, type) {
-  if (STELLAR_TYPES.has(type)) return val * M_SUN;
-  return                              val * M_EARTH;
 }
 
 export class UI {
@@ -46,18 +29,16 @@ export class UI {
     this.onUpdate = onUpdate;
 
     this.selectedId = null;
-    this.velArrow   = null;  // { fromWorld, toScreen } — read by renderer
+    this.velArrow   = null;
 
     // ── Drag state machine ────────────────────────────────
-    // Three mutually exclusive drag modes: PAN, BODY_MOVE, VEL_ARROW
-    // Mode is decided on first mousemove after mousedown (>8px threshold for body clicks)
-    this._dragMode     = 'none';  // 'none' | 'pan' | 'body' | 'vel'
-    this._dragBodyId   = null;    // which body is being dragged (body or vel mode)
-    this._dragBodyOffset = { x: 0, y: 0 };  // world-space offset for body move
-    this._dragStart    = { x: 0, y: 0 };    // screen px where drag began
-    this._panStart     = { x: 0, y: 0 };
-    this._camAtStart   = { x: 0, y: 0 };
-    this._velCommitted = false;   // true if vel arrow was long enough to commit
+    this._dragMode       = 'none'; // 'none' | 'pan' | 'body' | 'vel'
+    this._dragBodyId     = null;
+    this._dragBodyOffset = { x: 0, y: 0 };
+    this._dragStart      = { x: 0, y: 0 };
+    this._panStart       = { x: 0, y: 0 };
+    this._camAtStart     = { x: 0, y: 0 };
+    this._velCommitted   = false;
 
     // Ghost
     this._ghostType = null;
@@ -67,16 +48,12 @@ export class UI {
     this._tooltipEl   = document.getElementById('tooltip');
     this._tooltipBody = null;
 
-    // Dial drag
-    this._dialDragging = false;
-
     this._bindEvents();
     this._bindToolbar();
     this._bindKeyboard();
     this._buildPresetsModal();
     this._cacheDOMRefs();
 
-    // Sub-controllers
     this.propsPanel = new PropsPanel({
       bodies:        this.bodies,
       physics:       this.physics,
@@ -88,25 +65,14 @@ export class UI {
     this.hud = new HUD();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // DOM ELEMENT CACHE
-  // Pre-resolved once at startup to avoid repeated getElementById in hot paths.
-  // HUD elements live in hud.js; props panel elements live in props-panel.js.
-  // Only elements used directly by UI (drag hints, selection, vel-arrow) are here.
-  // ─────────────────────────────────────────────────────────
   _cacheDOMRefs() {
     this._dom = {
-      // Vel-arrow hint and empty-canvas hint
       velArrowHint:    document.getElementById('vel-arrow-hint'),
       emptyHint:       document.getElementById('empty-hint'),
-      // Reclassify toast (also referenced by PropsPanel via its own _dom)
       reclassifyToast: document.getElementById('reclassify-toast'),
     };
   }
 
-  // ─────────────────────────────────────────────────────────
-  // EVENT BINDING
-  // ─────────────────────────────────────────────────────────
   _bindEvents() {
     const container = this.canvas.parentElement;
 
@@ -121,23 +87,16 @@ export class UI {
 
     // ── Global mousemove ──────────────────────────────────
     window.addEventListener('mousemove', (e) => {
-      // Ghost follows cursor
-      if (this._ghostType) {
-        this._moveGhost(e.clientX, e.clientY);
-        return;
-      }
+      if (this._ghostType) { this._moveGhost(e.clientX, e.clientY); return; }
 
       const rect = this.canvas.getBoundingClientRect();
       const sx   = e.clientX - rect.left;
       const sy   = e.clientY - rect.top;
 
-      // ── Decide drag mode on first significant movement ──
       if (this._dragMode === 'pending-body') {
         const dx = e.clientX - this._dragStart.x;
         const dy = e.clientY - this._dragStart.y;
         if (Math.sqrt(dx*dx + dy*dy) > 8) {
-          // Left-drag on a selected body → VEL ARROW
-          // Hold Alt while dragging to MOVE the body instead
           if (e.altKey) {
             this._dragMode = 'body';
             container.classList.add('dragging-body');
@@ -150,7 +109,6 @@ export class UI {
         }
       }
 
-      // ── Body move ────────────────────────────────────────
       if (this._dragMode === 'body') {
         const world = this.camera.screenToWorld(sx, sy, this.canvas);
         const body  = this.bodies.find(b => b.id === this._dragBodyId);
@@ -158,13 +116,12 @@ export class UI {
           body.x = world.x - this._dragBodyOffset.x;
           body.y = world.y - this._dragBodyOffset.y;
           body.clearTrail();
-          body.clearPermTrail();   // prevent teleport line in permanent trail
+          body.clearPermTrail();
           if (this.selectedId === body.id) this.propsPanel.update(body);
         }
         return;
       }
 
-      // ── Pan ───────────────────────────────────────────────
       if (this._dragMode === 'pan') {
         const dx = e.clientX - this._panStart.x;
         const dy = e.clientY - this._panStart.y;
@@ -173,29 +130,27 @@ export class UI {
         return;
       }
 
-      // ── Velocity arrow ────────────────────────────────────
       if (this._dragMode === 'vel') {
         const body = this.bodies.find(b => b.id === this._dragBodyId);
         if (body) {
           this.velArrow = { fromWorld: { x: body.x, y: body.y }, toScreen: { x: sx, y: sy } };
-          // Live-preview in props panel
           const vel = this._arrowToVelocity(body, sx, sy);
           this._previewVelocity(vel.vx, vel.vy);
         }
         return;
       }
 
-      // ── Tooltip + cursor on hover (idle) ─────────────────
+      // Tooltip + cursor on hover (idle)
       if (e.clientX >= rect.left && e.clientX <= rect.right &&
           e.clientY >= rect.top  && e.clientY <= rect.bottom) {
         const world = this.camera.screenToWorld(sx, sy, this.canvas);
         const hit   = this._hitTest(world.x, world.y);
         if (hit && hit.id !== this.selectedId) {
           this._showTooltip(hit, e.clientX, e.clientY);
-          container.style.cursor = 'grab';   // hint: draggable
+          container.style.cursor = 'grab';
         } else {
           this._hideTooltip();
-          container.style.cursor = '';        // back to CSS crosshair default
+          container.style.cursor = '';
         }
       } else {
         this._hideTooltip();
@@ -205,7 +160,6 @@ export class UI {
 
     // ── Global mouseup ────────────────────────────────────
     window.addEventListener('mouseup', (e) => {
-      // Drop palette ghost
       if (this._ghostType) {
         const rect = this.canvas.getBoundingClientRect();
         if (e.clientX >= rect.left && e.clientX <= rect.right &&
@@ -230,7 +184,6 @@ export class UI {
 
       if (prevMode === 'pan' || prevMode === 'pending-body') {
         container.classList.remove('panning');
-        // pending-body with no drag = pure click → now open props panel
         if (prevMode === 'pending-body' && this._dragBodyId !== null) {
           const body = this.bodies.find(b => b.id === this._dragBodyId);
           if (body) this.propsPanel.open(body);
@@ -246,7 +199,6 @@ export class UI {
         const body = this.bodies.find(b => b.id === this._dragBodyId);
         if (body) {
           const vel = this._arrowToVelocity(body, sx, sy);
-          // Only commit if arrow is longer than 5 screen pixels
           const ws  = this.camera.worldToScreen(body.x, body.y, this.canvas);
           const len = Math.sqrt((sx-ws.x)**2 + (sy-ws.y)**2);
           if (len > 5) {
@@ -269,7 +221,6 @@ export class UI {
       const sx   = e.clientX - rect.left;
       const sy   = e.clientY - rect.top;
 
-      // Middle or Alt+Left on empty space = pan
       if (e.button === 1) {
         e.preventDefault();
         this._dragMode   = 'pan';
@@ -286,20 +237,13 @@ export class UI {
         const hit   = this._hitTest(world.x, world.y);
 
         if (hit) {
-          // Only highlight selection visually on mousedown — defer opening props panel
-          // until mouseup (pure click). This prevents the panel from opening and shifting
-          // the canvas during a velocity-arrow drag.
           this.selectedId = hit.id;
           this._hideTooltip();
           this._dragMode   = 'pending-body';
           this._dragBodyId = hit.id;
           this._dragStart  = { x: e.clientX, y: e.clientY };
-          this._dragBodyOffset = {
-            x: world.x - hit.x,
-            y: world.y - hit.y,
-          };
+          this._dragBodyOffset = { x: world.x - hit.x, y: world.y - hit.y };
         } else {
-          // Empty space = pan
           this.deselect();
           this._hideHint();
           this._dragMode   = 'pan';
@@ -310,7 +254,6 @@ export class UI {
       }
     });
 
-    // Scroll zoom
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const rect   = this.canvas.getBoundingClientRect();
@@ -320,28 +263,17 @@ export class UI {
 
     this.canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-    // ── Touch events ──────────────────────────────────────
-    // Map single-finger touch → mouse-style drag (pan + vel arrow)
-    // Map pinch (two-finger) → zoom
     this._bindTouch();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // TOUCH SUPPORT
-  // Single finger: pan (on empty) or vel-arrow (on body)
-  // Two fingers:   pinch-to-zoom
-  // ─────────────────────────────────────────────────────────
   _bindTouch() {
     const canvas = this.canvas;
-
-    // Track second-touch distance for pinch
     let _pinchDist = null;
 
     const getTouchPos = (touch) => {
       const rect = canvas.getBoundingClientRect();
       return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
     };
-
     const pinchDistance = (touches) => {
       const dx = touches[0].clientX - touches[1].clientX;
       const dy = touches[0].clientY - touches[1].clientY;
@@ -350,23 +282,18 @@ export class UI {
 
     canvas.addEventListener('touchstart', (e) => {
       e.preventDefault();
-
       if (e.touches.length === 2) {
-        // Entering pinch mode — cancel any ongoing drag
         this._dragMode = 'none';
         this.velArrow  = null;
         _pinchDist = pinchDistance(e.touches);
         return;
       }
-
       if (e.touches.length !== 1) return;
       const pos   = getTouchPos(e.touches[0]);
       const world = this.camera.screenToWorld(pos.x, pos.y, canvas);
       const hit   = this._hitTest(world.x, world.y);
 
       if (hit) {
-        // Set selection visually but DON'T open props panel yet — defer to touchend
-        // (same pattern as mousedown, prevents panel opening during vel-arrow drag)
         this.selectedId  = hit.id;
         this._hideTooltip();
         this._dragMode   = 'pending-body';
@@ -384,12 +311,9 @@ export class UI {
 
     canvas.addEventListener('touchmove', (e) => {
       e.preventDefault();
-
-      // ── Pinch-to-zoom ────────────────────────────────────
       if (e.touches.length === 2 && _pinchDist !== null) {
         const newDist = pinchDistance(e.touches);
         const factor  = newDist / _pinchDist;
-        // Zoom around midpoint of the two fingers
         const rect  = canvas.getBoundingClientRect();
         const midX  = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
         const midY  = ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
@@ -397,17 +321,14 @@ export class UI {
         _pinchDist = newDist;
         return;
       }
-
       if (e.touches.length !== 1) return;
-      const t  = e.touches[0];
+      const t   = e.touches[0];
       const pos = getTouchPos(t);
 
-      // Promote pending-body to a mode after 8px threshold
       if (this._dragMode === 'pending-body') {
         const dx = t.clientX - this._dragStart.x;
         const dy = t.clientY - this._dragStart.y;
         if (Math.sqrt(dx*dx + dy*dy) > 8) {
-          // On touch, default to vel arrow (no Alt key on mobile)
           this._dragMode = 'vel';
           this._velCommitted = false;
           this._hideHint();
@@ -435,11 +356,9 @@ export class UI {
     canvas.addEventListener('touchend', (e) => {
       e.preventDefault();
       _pinchDist = null;
-
       const prevMode = this._dragMode;
       this._dragMode = 'none';
 
-      // Pure tap on a body (pending-body, no drag) → open props panel
       if (prevMode === 'pending-body' && this._dragBodyId !== null) {
         const body = this.bodies.find(b => b.id === this._dragBodyId);
         if (body) this.propsPanel.open(body);
@@ -448,18 +367,15 @@ export class UI {
       }
 
       if (prevMode === 'vel') {
-        // Capture body ref before clearing _dragBodyId
         const body = this.bodies.find(b => b.id === this._dragBodyId);
-        // Find last touch (changedTouches has the lifted finger)
-        const t   = e.changedTouches[0];
-        const pos = getTouchPos(t);
+        const t    = e.changedTouches[0];
+        const pos  = getTouchPos(t);
         if (body) {
           const vel = this._arrowToVelocity(body, pos.x, pos.y);
           const ws  = this.camera.worldToScreen(body.x, body.y, canvas);
           const len = Math.sqrt((pos.x-ws.x)**2 + (pos.y-ws.y)**2);
           if (len > 5) {
-            body.vx = vel.vx;
-            body.vy = vel.vy;
+            body.vx = vel.vx; body.vy = vel.vy;
             body.clearTrail();
             this.physics.markDirty();
             this.propsPanel.update(body);
@@ -471,7 +387,6 @@ export class UI {
       }
     }, { passive: false });
 
-    // Palette items: tap to place at canvas center (mobile-friendly alternative to drag)
     document.querySelectorAll('.palette-item:not(.locked)').forEach(item => {
       item.addEventListener('touchstart', (e) => {
         e.preventDefault();
@@ -484,27 +399,15 @@ export class UI {
     });
   }
 
-  // ─────────────────────────────────────────────────────────
-  // ARROW → VELOCITY  (zoom-invariant)
-  // 100 px = 1 AU/yr at zoom=1
-  // ─────────────────────────────────────────────────────────
   _arrowToVelocity(body, sx, sy) {
     const ws = this.camera.worldToScreen(body.x, body.y, this.canvas);
-    // Convert screen delta → world delta → velocity
-    // world_delta (AU) = screen_delta_px / zoom
-    // velocity (AU/yr) = world_delta × SENSITIVITY
-    // SENSITIVITY=2.5: at default zoom=40 px/AU, a 100px drag = 2.5 AU/yr × (100/40) = 6.25 AU/yr
-    // = 29.6 km/s ≈ Earth orbital speed. Feels natural.
-    // (Old value was 10 — 4× too fast)
     const SENSITIVITY = 2.5;
     const worldDx = (sx - ws.x) / this.camera.zoom;
     const worldDy = (sy - ws.y) / this.camera.zoom;
     let vx = worldDx * SENSITIVITY;
     let vy = worldDy * SENSITIVITY;
 
-    // ── Circular orbit snap ───────────────────────────────
-    // Find the most massive other body (attractor)
-    const G = this.physics.G;  // use live G (may be modified by G slider)
+    const G = this.physics.G;
     let attractor = null;
     for (const b of this.bodies) {
       if (b.id === body.id) continue;
@@ -517,36 +420,25 @@ export class UI {
       if (r > 0.001) {
         const v_circ = Math.sqrt(G * attractor.mass / r);
         const v_curr = Math.sqrt(vx*vx + vy*vy);
-        const snapZone = 0.05; // 5% tolerance
-        if (Math.abs(v_curr - v_circ) / v_circ < snapZone) {
-          // Snap speed to exactly v_circ, keep direction perpendicular to radius
-          // Perpendicular direction (90° CCW from radius)
+        if (Math.abs(v_curr - v_circ) / v_circ < 0.05) {
           const rx = dx / r, ry = dy / r;
-          // Determine which perpendicular matches user's drag direction
           const perpCCW = { x: -ry, y:  rx };
           const perpCW  = { x:  ry, y: -rx };
           const dot     = vx * perpCCW.x + vy * perpCCW.y;
           const perp    = dot >= 0 ? perpCCW : perpCW;
           vx = perp.x * v_circ;
           vy = perp.y * v_circ;
-          // Signal to renderer that we're snapped
           if (this.velArrow) this.velArrow._snapped = true;
         } else {
           if (this.velArrow) this.velArrow._snapped = false;
         }
       }
     }
-
     return { vx, vy };
   }
 
-  _previewVelocity(vx, vy) {
-    this.propsPanel.previewVelocity(vx, vy);
-  }
+  _previewVelocity(vx, vy) { this.propsPanel.previewVelocity(vx, vy); }
 
-  // ─────────────────────────────────────────────────────────
-  // HIT TEST
-  // ─────────────────────────────────────────────────────────
   _hitTest(wx, wy) {
     for (let i = this.bodies.length - 1; i >= 0; i--) {
       const b    = this.bodies[i];
@@ -557,27 +449,19 @@ export class UI {
     return null;
   }
 
-  // ─────────────────────────────────────────────────────────
-  // PLACE BODY
-  // ─────────────────────────────────────────────────────────
   _placeBody(type, wx, wy) {
     const b = new Body(type, wx, wy);
     this.bodies.push(b);
     this.select(b.id);
     this._updateHint();
     this.physics.markDirty();
-    // Only auto-fit on first body — re-fitting on every drop causes jarring zoom jumps
     if (this.bodies.length === 1) {
       this.camera.fitBodies(this.bodies, this.canvas);
-      // Auto-start on first body so the canvas feels live immediately
       if (!this.physics.running) this.togglePlay();
     }
     this.onUpdate();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // GHOST
-  // ─────────────────────────────────────────────────────────
   _showGhost(cx, cy, type) {
     const icons = {
       star:        '<svg width="40" height="40" viewBox="0 0 40 40"><circle cx="20" cy="20" r="10" fill="#FFC940"/><circle cx="20" cy="20" r="14" fill="none" stroke="#FFC940" stroke-width="0.8" opacity="0.5"/></svg>',
@@ -594,31 +478,21 @@ export class UI {
   _moveGhost(cx, cy) { this._ghostEl.style.left = cx+'px'; this._ghostEl.style.top = cy+'px'; }
   _hideGhost() { this._ghostEl.style.display = 'none'; }
 
-  // ─────────────────────────────────────────────────────────
-  // TOOLTIP
-  // ─────────────────────────────────────────────────────────
   _showTooltip(body, cx, cy) {
     this._tooltipBody = body.id;
     const { val: mVal, unit: mUnit } = massToDisplay(body);
-    const massStr = mVal.toFixed(3) + ' ' + mUnit.split(' ')[0];
     this._tooltipEl.innerHTML =
       `<strong style="color:${body.color}">${body.name}</strong><br>` +
-      `Type: ${body.type}<br>Mass: ${massStr}<br>Speed: ${body.speedKms.toFixed(1)} km/s`;
+      `Type: ${body.type}<br>Mass: ${mVal.toFixed(3)} ${mUnit.split(' ')[0]}<br>Speed: ${body.speedKms.toFixed(1)} km/s`;
     this._tooltipEl.style.display = 'block';
     this._tooltipEl.style.left = (cx+14)+'px';
     this._tooltipEl.style.top  = (cy-10)+'px';
   }
   _hideTooltip() { this._tooltipEl.style.display = 'none'; this._tooltipBody = null; }
 
-  // ─────────────────────────────────────────────────────────
-  // VEL HINT
-  // ─────────────────────────────────────────────────────────
   _showHint() { if (this._dom.velArrowHint) this._dom.velArrowHint.classList.remove('hidden'); }
   _hideHint() { if (this._dom.velArrowHint) this._dom.velArrowHint.classList.add('hidden'); }
 
-  // ─────────────────────────────────────────────────────────
-  // SELECTION
-  // ─────────────────────────────────────────────────────────
   select(id) {
     this.selectedId = id;
     const body = this.bodies.find(b => b.id === id);
@@ -626,12 +500,6 @@ export class UI {
   }
   deselect() { this.selectedId = null; this.propsPanel.close(); }
 
-  // ─────────────────────────────────────────────────────────
-  // PROPS PANEL
-  // ─────────────────────────────────────────────────────────
-  // ─────────────────────────────────────────────────────────
-  // DELETE
-  // ─────────────────────────────────────────────────────────
   _deleteSelected() {
     if (this.selectedId === null) return;
     const idx = this.bodies.findIndex(b => b.id === this.selectedId);
@@ -641,9 +509,6 @@ export class UI {
     this.onUpdate();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // TOOLBAR
-  // ─────────────────────────────────────────────────────────
   _bindToolbar() {
     document.getElementById('btn-play').addEventListener('click', () => this.togglePlay());
     document.getElementById('btn-reset-view').addEventListener('click', () => {
@@ -659,7 +524,6 @@ export class UI {
     });
     const slider = document.getElementById('speed-slider');
     const slabel = document.getElementById('speed-label');
-    // Initialise label from current slider value on startup
     slabel.textContent = this.physics.speedLabel(slider.value);
     slider.addEventListener('input', () => {
       this.physics.setSpeedFromSlider(slider.value);
@@ -680,8 +544,8 @@ export class UI {
 
   togglePlay() {
     this.physics.running = !this.physics.running;
-    const btn = document.getElementById('btn-play');
-    const lbl = document.getElementById('play-label');
+    const btn    = document.getElementById('btn-play');
+    const lbl    = document.getElementById('play-label');
     const iPlay  = document.getElementById('icon-play');
     const iPause = document.getElementById('icon-pause');
     if (this.physics.running) {
@@ -693,16 +557,13 @@ export class UI {
     }
   }
 
-  // ─────────────────────────────────────────────────────────
-  // PRESETS
-  // ─────────────────────────────────────────────────────────
   _buildPresetsModal() {
     const grid = document.getElementById('presets-grid');
     for (const preset of PRESETS) {
-      const card = document.createElement('div');
-      card.className = 'preset-card';
+      const card      = document.createElement('div');
+      card.className  = 'preset-card';
       const bodyCount = preset.bodies_data ? preset.bodies_data.length : preset.bodies;
-      card.innerHTML = `<div class="preset-card-title">${preset.name}</div><div class="preset-card-desc">${preset.desc}</div><div class="preset-card-meta">${bodyCount} bodies</div>`;
+      card.innerHTML  = `<div class="preset-card-title">${preset.name}</div><div class="preset-card-desc">${preset.desc}</div><div class="preset-card-meta">${bodyCount} bodies</div>`;
       card.addEventListener('click', () => {
         this._loadPreset(preset);
         document.getElementById('presets-overlay').classList.add('hidden');
@@ -737,9 +598,6 @@ export class UI {
     this.onUpdate();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // SAVE / LOAD
-  // ─────────────────────────────────────────────────────────
   _saveScene() {
     const data = { version: 2, simTime: this.physics.simTime,
       camera: { x: this.camera.x, y: this.camera.y, zoom: this.camera.zoom },
@@ -761,9 +619,6 @@ export class UI {
     this.onUpdate();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // CLEAR
-  // ─────────────────────────────────────────────────────────
   _clearAll(silent = false) {
     for (const b of this.bodies) b.clearPermTrail();
     this.bodies.length = 0;
@@ -773,26 +628,13 @@ export class UI {
     this.velArrow  = null;
     this._dragMode = 'none';
     this.physics.simTime = 0;
-    // Force-stop sim without toggling
-    if (this.physics.running) {
-      this.physics.running = false;
-      const btn = document.getElementById('btn-play');
-      const lbl = document.getElementById('play-label');
-      const ip  = document.getElementById('icon-play');
-      const ipa = document.getElementById('icon-pause');
-      if (btn) btn.classList.remove('active');
-      if (lbl) lbl.textContent = 'PLAY';
-      if (ip)  ip.style.display  = '';
-      if (ipa) ipa.style.display = 'none';
-    }
+    // Stop sim without duplicating button-update logic
+    if (this.physics.running) this.togglePlay();
     this.physics.markDirty();
     this._updateHint();
     if (!silent) this.onUpdate();
   }
 
-  // ─────────────────────────────────────────────────────────
-  // KEYBOARD
-  // ─────────────────────────────────────────────────────────
   _bindKeyboard() {
     window.addEventListener('keydown', (e) => {
       if (['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
@@ -821,10 +663,6 @@ export class UI {
     });
   }
 
-  // ─────────────────────────────────────────────────────────
-  // HUD
-  // ─────────────────────────────────────────────────────────
-  // Delegate to HUD sub-controller
   updateHUD(fps, physics) {
     const phys = physics || this.physics;
     this.hud.update(this.bodies, phys, fps);
