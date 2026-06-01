@@ -1,16 +1,24 @@
 // renderer.js — Canvas 2D rendering: starfield, trails, glows, bodies, overlays
 import { SIM, hexRgb } from './bodies/Body.js';
 
+// Glow layers per body type — defined once, not rebuilt every frame
+const GLOW_MAP = {
+  star:        [{ f:7, a:0.025 }, { f:4, a:0.06 }, { f:2.2, a:0.12 }, { f:1.4, a:0.2 }],
+  blackhole:   [{ f:8, a:0.015 }, { f:5, a:0.03 }, { f:2.5, a:0.05 }],
+  neutronstar: [{ f:5, a:0.04  }, { f:3, a:0.09 }, { f:1.6, a:0.18 }],
+  pulsar:      [{ f:6, a:0.05  }, { f:3, a:0.10 }, { f:1.5, a:0.20 }],
+  comet:       [{ f:3, a:0.03  }, { f:1.8, a:0.06 }],
+  planet:      [{ f:2.5, a:0.04 }, { f:1.6, a:0.08 }],
+};
+
 export class Renderer {
   constructor(canvas) {
     this.canvas    = canvas;
     this.ctx       = canvas.getContext('2d');
     this.offscreen = document.createElement('canvas'); // static starfield
     this._selectionAngle = 0; // for animated selection ring
-    this._initStarfield();
+    this._rebuildStarfield();
   }
-
-  _initStarfield() { this._rebuildStarfield(); }
 
   _rebuildStarfield() {
     const w = this.canvas.width  || window.innerWidth;
@@ -43,12 +51,12 @@ export class Renderer {
     // Stars — three size classes with color temperature variation
     const count = Math.floor((w * h) / 900);
     for (let i = 0; i < count; i++) {
-      const x       = Math.random() * w;
-      const y       = Math.random() * h;
+      const x         = Math.random() * w;
+      const y         = Math.random() * h;
       const classRoll = Math.random();
-      const r       = classRoll < 0.03 ? Math.random() * 1.6 + 1.0   // bright giants
-                    : classRoll < 0.18 ? Math.random() * 0.7 + 0.5   // medium
-                    : Math.random() * 0.35 + 0.15;                    // dim dwarfs
+      const r         = classRoll < 0.03 ? Math.random() * 1.6 + 1.0   // bright giants
+                      : classRoll < 0.18 ? Math.random() * 0.7 + 0.5   // medium
+                      :                    Math.random() * 0.35 + 0.15; // dim dwarfs
       const opacity = Math.random() * 0.55 + 0.25;
 
       // Color temperature: blue-white, white, warm yellow
@@ -118,8 +126,7 @@ export class Renderer {
     for (const b of bodies) {
       const trail = b.permTrail;
       if (!trail || trail.length < 2) continue;
-      const hex = b.color;
-      const [r, g, bl] = hexRgb(hex);
+      const [r, g, bl] = hexRgb(b.color);
 
       ctx.beginPath();
       let started = false;
@@ -158,9 +165,6 @@ export class Renderer {
     for (const b of bodies) {
       const trail = b.getTrail();
       if (trail.length < 3) continue;
-      // getTrail() always returns points in chronological order (handles ring-buffer
-      // reordering internally), so we can draw straight sequential paths — no jump
-      // detection needed here. Position teleports are handled by clearTrail/clearPermTrail.
       const [r, g, bl] = hexRgb(b.color);
       const segs = trail.length - 1;
 
@@ -191,20 +195,9 @@ export class Renderer {
     const ctx = this.ctx;
     const sp  = camera.worldToScreen(b.x, b.y, this.canvas);
     const sr  = Math.max(2, camera.worldSizeToScreen(b.radius));
+    const [r, g, bl] = hexRgb(b.color);
 
-    const hex = b.color;
-    const [r, g, bl] = hexRgb(hex);
-
-    const glowMap = {
-      star:        [{ f:7, a:0.025 }, { f:4, a:0.06 }, { f:2.2, a:0.12 }, { f:1.4, a:0.2 }],
-      blackhole:   [{ f:8, a:0.015 }, { f:5, a:0.03 }, { f:2.5, a:0.05 }],  // purple haze
-      neutronstar: [{ f:5, a:0.04  }, { f:3, a:0.09 }, { f:1.6, a:0.18 }],  // blue-white
-      pulsar:      [{ f:6, a:0.05  }, { f:3, a:0.10 }, { f:1.5, a:0.20 }],  // bright
-      comet:       [{ f:3, a:0.03  }, { f:1.8, a:0.06 }],
-      planet:      [{ f:2.5, a:0.04 }, { f:1.6, a:0.08 }],
-    };
-    const layers = glowMap[b.type] || glowMap.planet;
-
+    const layers = GLOW_MAP[b.type] || GLOW_MAP.planet;
     for (const { f, a } of layers) {
       const grad = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, sr * f);
       grad.addColorStop(0, `rgba(${r},${g},${bl},${a})`);
@@ -221,9 +214,7 @@ export class Renderer {
     const ctx = this.ctx;
     const sp  = camera.worldToScreen(b.x, b.y, this.canvas);
     const sr  = Math.max(2, camera.worldSizeToScreen(b.radius));
-
-    const hex = b.color;
-    const [r, g, bl] = hexRgb(hex);
+    const [r, g, bl] = hexRgb(b.color);
 
     if      (b.type === 'star')        this._drawStar(ctx, sp, sr, r, g, bl);
     else if (b.type === 'blackhole')   this._drawBlackHole(ctx, sp, sr, b);
@@ -240,7 +231,6 @@ export class Renderer {
       ctx.translate(sp.x, sp.y);
       ctx.rotate(this._selectionAngle);
 
-      // Outer dashed ring
       ctx.beginPath();
       ctx.arc(0, 0, ringR, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(91,142,255,0.85)`;
@@ -248,14 +238,13 @@ export class Renderer {
       ctx.setLineDash([5, 5]);
       ctx.stroke();
 
-      // Inner thin solid ring
       ctx.beginPath();
       ctx.arc(0, 0, ringR + 3, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(91,142,255,0.25)`;
       ctx.lineWidth   = 0.75;
       ctx.setLineDash([]);
       ctx.stroke();
-      ctx.lineWidth = 1; // reset lineWidth so outer draws are not affected
+      ctx.lineWidth = 1;
 
       ctx.restore();
 
@@ -274,7 +263,6 @@ export class Renderer {
   }
 
   _drawStar(ctx, sp, sr, r, g, bl) {
-    // Radial gradient body — bright core, dimmer edge
     const grad = ctx.createRadialGradient(
       sp.x - sr * 0.2, sp.y - sr * 0.2, 0,
       sp.x, sp.y, sr
@@ -290,7 +278,6 @@ export class Renderer {
   }
 
   _drawPlanet(ctx, sp, sr, r, g, bl, body) {
-    // Base sphere
     const grad = ctx.createRadialGradient(
       sp.x - sr * 0.3, sp.y - sr * 0.3, sr * 0.05,
       sp.x, sp.y, sr
@@ -311,7 +298,6 @@ export class Renderer {
       ctx.arc(sp.x, sp.y, sr, 0, Math.PI * 2);
       ctx.clip();
 
-      // 2–3 horizontal bands
       const bands = [
         { y: sp.y - sr * 0.35, h: sr * 0.18, a: 0.07 },
         { y: sp.y + sr * 0.15, h: sr * 0.14, a: 0.05 },
@@ -325,7 +311,7 @@ export class Renderer {
       ctx.restore();
     }
 
-    // Terminator — shadow on right side
+    // Terminator shadow
     const shadowGrad = ctx.createRadialGradient(
       sp.x + sr * 0.4, sp.y + sr * 0.3, 0,
       sp.x, sp.y, sr * 1.1
@@ -339,7 +325,7 @@ export class Renderer {
     ctx.fillStyle = shadowGrad;
     ctx.fill();
 
-    // Spaghettification stretch — elongate toward nearest BH
+    // Spaghettification stretch
     if (body && body.spaghetti > 0.05) {
       const stretch = 1 + body.spaghetti * 5;
       ctx.save();
@@ -357,7 +343,6 @@ export class Renderer {
   _drawBlackHole(ctx, sp, sr, body) {
     ctx.save();
 
-    // Accretion disk — two ellipses rotating at different rates
     const diskW = sr * 3.5, diskH = sr * 0.9;
     const angle1 = body.diskPhase;
     const angle2 = body.diskPhase * 0.7 + 1.2;
@@ -379,20 +364,17 @@ export class Renderer {
       ctx.restore();
     }
 
-    // Event horizon — pure black circle
     ctx.beginPath();
     ctx.arc(sp.x, sp.y, sr, 0, Math.PI * 2);
     ctx.fillStyle = '#000000';
     ctx.fill();
 
-    // Photon sphere ring
     ctx.beginPath();
     ctx.arc(sp.x, sp.y, sr * 1.5, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(139,92,246,0.6)';
     ctx.lineWidth   = 1.5;
     ctx.stroke();
 
-    // Inner glow ring
     ctx.beginPath();
     ctx.arc(sp.x, sp.y, sr * 1.2, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(220,180,255,0.35)';
@@ -406,7 +388,6 @@ export class Renderer {
   _drawNeutronStar(ctx, sp, sr, r, g, bl, spinAngle, isPulsar) {
     ctx.save();
 
-    // Core — tiny, incredibly dense, blue-white
     const coreGrad = ctx.createRadialGradient(
       sp.x - sr*0.15, sp.y - sr*0.15, 0,
       sp.x, sp.y, sr
@@ -420,14 +401,12 @@ export class Renderer {
     ctx.fillStyle = coreGrad;
     ctx.fill();
 
-    // Equatorial bulge ring
     ctx.beginPath();
     ctx.ellipse(sp.x, sp.y, sr*1.35, sr*0.5, spinAngle * Math.PI/180, 0, Math.PI*2);
     ctx.strokeStyle = `rgba(${r},${g},${bl},0.4)`;
     ctx.lineWidth   = 0.8;
     ctx.stroke();
 
-    // Pulsar beams — two opposing jets along spin axis
     if (isPulsar) {
       const beamAngle = spinAngle * Math.PI / 180;
       const beamLen   = sr * 9;
@@ -455,13 +434,11 @@ export class Renderer {
     ctx.save();
     const [r, g, bl] = hexRgb(body.color);
 
-    // Nucleus
     ctx.beginPath();
     ctx.arc(sp.x, sp.y, Math.max(2, sr), 0, Math.PI * 2);
     ctx.fillStyle = `rgb(${r},${g},${bl})`;
     ctx.fill();
 
-    // Coma — halo that grows near stars
     if (body.comaIntensity > 0.05) {
       const comaR = sr * (3 + body.comaIntensity * 5);
       const coma  = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, comaR);
@@ -478,8 +455,6 @@ export class Renderer {
   }
 
   // ── Velocity arrow ───────────────────────────────────────
-  // velArrow = { fromWorld, toScreen, _snapped }
-  // Draws orbit ring, predicted trace, snap indicator, and arrow shaft.
   _drawVelArrow(velArrow, camera, bodies, selectedId, physics) {
     const ctx = this.ctx;
     const { fromWorld, toScreen } = velArrow;
@@ -578,12 +553,11 @@ export class Renderer {
       traceVy = (toScreen.y - sp.y) / camera.zoom * SENSITIVITY;
     }
 
-    // Velocity Verlet integration (replaces old Euler — much more accurate near BH)
+    // Velocity Verlet integration
     const traceDt  = 0.004;
     const traceMax = 500;
     let tx = body.x, ty = body.y, tvx = traceVx, tvy = traceVy;
 
-    // Compute initial acceleration
     const adx0 = attractor.x - tx, ady0 = attractor.y - ty;
     const ar2_0 = adx0*adx0 + ady0*ady0 + 0.0025;
     const ar3_0 = ar2_0 * Math.sqrt(ar2_0);
@@ -592,21 +566,19 @@ export class Renderer {
 
     const pts = [camera.worldToScreen(tx, ty, this.canvas)];
     for (let t = 0; t < traceMax; t++) {
-      // Step 1: position with current acceleration
       tx += tvx * traceDt + 0.5 * ax_old * traceDt * traceDt;
       ty += tvy * traceDt + 0.5 * ay_old * traceDt * traceDt;
-      // Step 2: recompute acceleration at new position
       const adx = attractor.x - tx, ady = attractor.y - ty;
       const ar2 = adx*adx + ady*ady + 0.0025;
       const ar3 = ar2 * Math.sqrt(ar2);
       const ax_new = G * attractor.mass * adx / ar3;
       const ay_new = G * attractor.mass * ady / ar3;
-      // Step 3: velocity with average acceleration
       tvx += 0.5 * (ax_old + ax_new) * traceDt;
       tvy += 0.5 * (ay_old + ay_new) * traceDt;
       ax_old = ax_new; ay_old = ay_new;
 
       pts.push(camera.worldToScreen(tx, ty, this.canvas));
+
       // Early exit: loop closed
       if (t > 60) {
         const dsx = pts[pts.length-1].x - pts[0].x;
@@ -650,14 +622,15 @@ export class Renderer {
 
   // ── Arrow shaft, arrowhead, and speed label pill ─────────
   _drawArrowShaft(ctx, sp, toScreen, angle, speedAUyr, speedKms, velArrow) {
-    const arrowColor = velArrow._snapped ? 'rgba(80,255,160,0.92)' : 'rgba(80,210,255,0.92)';
-    const arrowGlow  = velArrow._snapped ? 'rgba(80,255,160,0.5)'  : 'rgba(80,210,255,0.5)';
+    const snapped    = velArrow._snapped;
+    const arrowColor = snapped ? 'rgba(80,255,160,0.92)' : 'rgba(80,210,255,0.92)';
+    const arrowGlow  = snapped ? 'rgba(80,255,160,0.5)'  : 'rgba(80,210,255,0.5)';
     ctx.save();
     ctx.strokeStyle = arrowColor;
     ctx.fillStyle   = arrowColor;
-    ctx.lineWidth   = velArrow._snapped ? 2.5 : 2;
+    ctx.lineWidth   = snapped ? 2.5 : 2;
     ctx.shadowColor = arrowGlow;
-    ctx.shadowBlur  = velArrow._snapped ? 14 : 8;
+    ctx.shadowBlur  = snapped ? 14 : 8;
     ctx.setLineDash([6, 4]);
     ctx.beginPath();
     ctx.moveTo(sp.x, sp.y);
@@ -689,11 +662,11 @@ export class Renderer {
     ctx.fill();
 
     ctx.font      = '700 10px "Orbitron", monospace';
-    ctx.fillStyle = velArrow._snapped ? 'rgba(80,255,160,0.98)' : 'rgba(160,230,255,0.98)';
+    ctx.fillStyle = snapped ? 'rgba(80,255,160,0.98)' : 'rgba(160,230,255,0.98)';
     ctx.textAlign = 'left';
     ctx.fillText(speedKms.toFixed(1) + ' km/s', lx, ly);
     ctx.font      = '9px "Space Mono", monospace';
-    ctx.fillStyle = velArrow._snapped ? 'rgba(80,220,140,0.8)' : 'rgba(100,180,220,0.7)';
+    ctx.fillStyle = snapped ? 'rgba(80,220,140,0.8)' : 'rgba(100,180,220,0.7)';
     ctx.fillText(speedAUyr.toFixed(3) + ' AU/yr', lx, ly + 13);
     ctx.restore();
   }

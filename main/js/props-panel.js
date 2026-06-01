@@ -1,27 +1,12 @@
 // props-panel.js — body properties sidebar
-// Owns: open/close, field updates, stats, dial, reclassification, toast.
 
-import { SIM, classifyType } from './bodies/Body.js';
+import { SIM, classifyType, massToDisplay, displayToMass } from './bodies/Body.js';
 
-// ── Mass display helpers (duplicated from ui.js to avoid circular dep) ──
-const M_SUN   = 1989000;
-const M_EARTH = 6;
-function massToDisplay(body) {
-  if (['star','blackhole','neutronstar','pulsar'].includes(body.type)) {
-    return { val: body.mass / M_SUN,   unit: 'M☉' };
-  }
-  return { val: body.mass / M_EARTH, unit: 'M⊕' };
-}
-function displayToMass(val, type) {
-  return ['star','blackhole','neutronstar','pulsar'].includes(type)
-    ? val * M_SUN : val * M_EARTH;
-}
 function vxyToSpeedDir(vx, vy) {
   const speedAUyr = Math.sqrt(vx*vx + vy*vy);
-  const speedKms  = speedAUyr * SIM.velUnit;
   let deg = Math.atan2(vy, vx) * 180 / Math.PI;
   if (deg < 0) deg += 360;
-  return { speedKms, speedAUyr, deg };
+  return { speedKms: speedAUyr * SIM.velUnit, speedAUyr, deg };
 }
 function speedDirToVxy(speedKms, deg) {
   const speedAUyr = speedKms / SIM.velUnit;
@@ -29,15 +14,13 @@ function speedDirToVxy(speedKms, deg) {
   return { vx: speedAUyr * Math.cos(rad), vy: speedAUyr * Math.sin(rad) };
 }
 
+const TYPE_LABELS = {
+  star:'Star', planet:'Planet', blackhole:'Black Hole',
+  neutronstar:'Neutron Star', pulsar:'Pulsar', comet:'Comet',
+};
+const TYPE_ICONS = { star:'★', planet:'◉', blackhole:'◈', neutronstar:'✦', pulsar:'✦', comet:'☄' };
+
 export class PropsPanel {
-  /**
-   * @param {object} opts
-   * @param {Body[]}    opts.bodies      — shared bodies array ref
-   * @param {Physics}   opts.physics     — physics instance
-   * @param {Renderer}  opts.renderer    — renderer (for resize on open/close)
-   * @param {HTMLCanvasElement} opts.canvas
-   * @param {() => number|null} opts.getSelectedId
-   */
   constructor({ bodies, physics, renderer, canvas, getSelectedId, onDelete }) {
     this.bodies        = bodies;
     this.physics       = physics;
@@ -94,7 +77,6 @@ export class PropsPanel {
     });
   }
 
-  // Called every frame when a body is selected, and on explicit edits.
   update(body) {
     if (!body) return;
     this._dom.typeLabel.textContent = body.type.toUpperCase();
@@ -102,8 +84,8 @@ export class PropsPanel {
     const md = massToDisplay(body);
     this._dom.propMass.value = md.val.toFixed(4);
     if (this._dom.massUnitLabel) this._dom.massUnitLabel.textContent = md.unit;
-    this._dom.propRadius.value      = body.radius.toFixed(2);
-    this._dom.propColor.value       = body.color;
+    this._dom.propRadius.value         = body.radius.toFixed(2);
+    this._dom.propColor.value          = body.color;
     this._dom.propColorHex.textContent = body.color;
     const { speedKms, deg } = vxyToSpeedDir(body.vx, body.vy);
     this._dom.propSpeed.value = speedKms.toFixed(2);
@@ -112,7 +94,6 @@ export class PropsPanel {
     this.updateStats(body);
   }
 
-  // Called every frame to refresh live stats without touching input fields.
   updateStats(body) {
     if (!body) return;
     this._dom.statSpeed.textContent = body.speedKms.toFixed(1) + ' km/s';
@@ -134,11 +115,7 @@ export class PropsPanel {
     const clEl = this._dom.statClassify;
     if (clEl) {
       const predicted = classifyType(body.mass, body.radius, body.type);
-      const LABELS = {
-        star:'Star', planet:'Planet', blackhole:'Black Hole',
-        neutronstar:'Neutron Star', pulsar:'Pulsar', comet:'Comet',
-      };
-      const label = LABELS[predicted] || predicted;
+      const label = TYPE_LABELS[predicted] || predicted;
       const same  = predicted === body.type;
       clEl.textContent = same ? `✓ ${label}` : `→ ${label}`;
       clEl.style.color = same ? 'var(--text-dim)' : '#facc15';
@@ -153,7 +130,6 @@ export class PropsPanel {
     }
   }
 
-  // ── Reclassification ─────────────────────────────────────
   tryReclassify() {
     const body = this.bodies.find(b => b.id === this.getSelectedId());
     if (!body) return;
@@ -166,22 +142,16 @@ export class PropsPanel {
   }
 
   _showToast(oldType, newType) {
-    const LABELS = {
-      star:'Star', planet:'Planet', blackhole:'Black Hole',
-      neutronstar:'Neutron Star', pulsar:'Pulsar', comet:'Comet',
-    };
-    const ICONS = { star:'★', planet:'◉', blackhole:'◈', neutronstar:'✦', pulsar:'✦', comet:'☄' };
     const el = this._dom.toast;
     if (!el) return;
     el.innerHTML =
-      `<span class="toast-icon">${ICONS[newType] || '◉'}</span>` +
-      `<span class="toast-text">Reclassified: <b>${LABELS[oldType]}</b> → <b>${LABELS[newType]}</b></span>`;
+      `<span class="toast-icon">${TYPE_ICONS[newType] || '◉'}</span>` +
+      `<span class="toast-text">Reclassified: <b>${TYPE_LABELS[oldType]}</b> → <b>${TYPE_LABELS[newType]}</b></span>`;
     el.className = 'reclassify-toast visible';
     clearTimeout(this._toastTimer);
     this._toastTimer = setTimeout(() => { el.className = 'reclassify-toast'; }, 3000);
   }
 
-  // ── Dial (public so ui.js can call it during vel-arrow drag) ─
   updateDial(deg) {
     const needle = this._dom.dirDialNeedle;
     if (!needle) return;
@@ -190,27 +160,22 @@ export class PropsPanel {
     needle.setAttribute('y2', (16 + 13 * Math.sin(rad)).toFixed(1));
   }
 
-  // ── Preview velocity during vel-arrow drag (called by ui.js) ─
   previewVelocity(vx, vy) {
     const speedAUyr = Math.sqrt(vx*vx + vy*vy);
-    const speedKms  = speedAUyr * SIM.velUnit;
     let deg = Math.atan2(vy, vx) * 180 / Math.PI;
     if (deg < 0) deg += 360;
-    if (this._dom.propSpeed) this._dom.propSpeed.value = speedKms.toFixed(2);
+    if (this._dom.propSpeed) this._dom.propSpeed.value = (speedAUyr * SIM.velUnit).toFixed(2);
     if (this._dom.propDir)   this._dom.propDir.value   = deg.toFixed(1);
     this.updateDial(deg);
   }
 
-  // ── Input event bindings ──────────────────────────────────
   _bindEvents() {
     const getBody = () => this.bodies.find(b => b.id === this.getSelectedId());
 
     const applyVelocity = () => {
       const b = getBody(); if (!b) return;
-      const rawSpeed = parseFloat(this._dom.propSpeed.value);
-      const rawDir   = parseFloat(this._dom.propDir.value);
-      const speedKms = isNaN(rawSpeed) ? 0 : rawSpeed;
-      const deg      = isNaN(rawDir)   ? 0 : rawDir;
+      const speedKms = parseFloat(this._dom.propSpeed.value) || 0;
+      const deg      = parseFloat(this._dom.propDir.value)   || 0;
       const { vx, vy } = speedDirToVxy(speedKms, deg);
       b.vx = vx; b.vy = vy;
       b.clearTrail();
@@ -246,11 +211,8 @@ export class PropsPanel {
       if (b) { b.color = e.target.value; this._dom.propColorHex.textContent = e.target.value; }
     });
 
-    document.getElementById('btn-delete-body').addEventListener('click', () => {
-      this._onDelete();
-    });
+    document.getElementById('btn-delete-body').addEventListener('click', () => this._onDelete());
 
-    // Dial drag
     const dial = document.getElementById('dir-dial');
     if (dial) {
       const onMove = (e) => {

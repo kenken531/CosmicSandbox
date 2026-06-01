@@ -4,15 +4,12 @@
 // and high simulation speeds, momentum-conserving collision merges, and
 // energy-drift tracking for conservation monitoring.
 
-import { SIM } from './bodies/Body.js';
+import { SIM, blendHex } from './bodies/Body.js';
 
 export class Physics {
   constructor() {
     this.G             = SIM.G;      // 1.9855e-5 AU³ yr⁻² (1e24 kg)⁻¹
-    this.softening     = 0.05;        // ε (AU) — prevents singularity
-    // Reduced from 0.3: large softening biases gravity at orbital distances (~1 AU),
-    // causing slow artificial precession and drift. 0.05 is negligible at ≥0.5 AU.
-    // Close-approach singularities are handled by adaptive micro-stepping instead.
+    this.softening     = 0.05;       // ε (AU) — prevents singularity at close range
     this.timeScale     = 1.0;
     this.running       = false;
     this.collisionMode = 'merge';    // 'merge' | 'passthrough'
@@ -30,13 +27,11 @@ export class Physics {
     this.collisionEvents = [];
 
     // Dirty flag: recompute accelerations before first Verlet step after any external change
-    // and after any external scene change (drag, load, clear)
     this._dirty = true;
   }
 
   get dt() { return this.baseDt * this.timeScale; }
 
-  // Call this whenever bodies are moved externally (drag, preset, clear)
   markDirty()   { this._dirty = true; this.resetEnergy(); }
   resetEnergy() { this._initEnergy = null; this.energyDrift = 0; }
 
@@ -76,9 +71,7 @@ export class Physics {
     }
 
     // Adaptive micro-substeps:
-    // 1. Period-based: ensure at least 20 steps per orbit for the tightest pair.
-    //    T = 2π√(r³/GM_total); substeps = ceil(T_orbit / dt * 20)
-    //    This prevents close orbits from being traced as polygons.
+    // 1. Period-based: ensure ≥20 steps per orbit for the tightest pair.
     // 2. Speed-based: scale with timeScale so high-speed simulations stay accurate.
     let periodSubsteps = 1;
     for (let i = 0; i < n; i++) {
@@ -89,42 +82,43 @@ export class Physics {
         if (r < 1e-6) continue;
         const Mtot = bodies[i].mass + bodies[j].mass;
         const T    = 2 * Math.PI * Math.sqrt(r * r * r / (this.G * Mtot));
-        const need = Math.ceil(dt / (T / 20));  // substeps to get 20 steps/orbit
+        const need = Math.ceil(dt / (T / 20));
         if (need > periodSubsteps) periodSubsteps = need;
       }
     }
     const speedSubsteps = Math.max(1, Math.ceil(this.timeScale / 2));
-    const microSteps = Math.min(200, Math.max(periodSubsteps, speedSubsteps));
-    const microDt = dt / microSteps;
+    const microSteps    = Math.min(200, Math.max(periodSubsteps, speedSubsteps));
+    const microDt       = dt / microSteps;
     this.lastMicroSteps = microSteps;  // exposed for HUD display
 
     for (let ms = 0; ms < microSteps; ms++) {
-    // Step 1: x(t+dt) = x + v·dt + ½·a·dt²
-    for (let i = 0; i < n; i++) {
-      const b = bodies[i];
-      b.x += b.vx * microDt + 0.5 * b.ax * microDt * microDt;
-      b.y += b.vy * microDt + 0.5 * b.ay * microDt * microDt;
-      b._ax_old = b.ax;
-      b._ay_old = b.ay;
-    }
+      // Step 1: x(t+dt) = x + v·dt + ½·a·dt²
+      for (let i = 0; i < n; i++) {
+        const b = bodies[i];
+        b.x += b.vx * microDt + 0.5 * b.ax * microDt * microDt;
+        b.y += b.vy * microDt + 0.5 * b.ay * microDt * microDt;
+        b._ax_old = b.ax;
+        b._ay_old = b.ay;
+      }
 
-    // Step 2: compute a(t+dt) at new positions
-    this._computeAccel(bodies);
+      // Step 2: compute a(t+dt) at new positions
+      this._computeAccel(bodies);
 
-    // Step 3: v(t+dt) = v + ½·(a_old + a_new)·dt
-    for (let i = 0; i < n; i++) {
-      const b = bodies[i];
-      b.vx += 0.5 * (b._ax_old + b.ax) * microDt;
-      b.vy += 0.5 * (b._ay_old + b.ay) * microDt;
+      // Step 3: v(t+dt) = v + ½·(a_old + a_new)·dt
+      for (let i = 0; i < n; i++) {
+        const b = bodies[i];
+        b.vx += 0.5 * (b._ax_old + b.ax) * microDt;
+        b.vy += 0.5 * (b._ay_old + b.ay) * microDt;
+      }
+
+      // Only record trail on final micro-step — keeps trail density at 1 pt/frame
+      if (ms === microSteps - 1) {
+        for (let i = 0; i < n; i++) bodies[i].recordTrail();
+      }
     }
-    // Only record trail on final micro-step — keeps trail density at 1 pt/frame
-    if (ms === microSteps - 1) {
-      for (let i = 0; i < n; i++) bodies[i].recordTrail();
-    }
-    } // end micro-step loop
 
     // ── Collision detection ──────────────────────────────
-    const toRemove    = new Set();
+    const toRemove     = new Set();
     let   hadCollision = false;
 
     if (this.collisionMode !== 'passthrough') {
@@ -134,13 +128,10 @@ export class Physics {
           const bi = bodies[i], bj = bodies[j];
           const dx = bj.x - bi.x, dy = bj.y - bi.y;
           const dist = Math.sqrt(dx*dx + dy*dy);
-          // Use physicsRadius (tiny, in AU) not display radius (huge, causes instant merges)
           if (dist < (bi.physicsRadius + bj.physicsRadius)) {
             hadCollision = true;
             const totalMass = bi.mass + bj.mass;
             const [survivor, victim] = bi.mass >= bj.mass ? [bi, bj] : [bj, bi];
-
-            // Capture blend fraction before mutating survivor.mass
             const blendT = victim.mass / totalMass;
 
             this.collisionEvents.push({
@@ -162,22 +153,17 @@ export class Physics {
             survivor.mass   = totalMass;
             survivor.radius        = Math.cbrt(survivor.radius**3        + victim.radius**3);
             survivor.physicsRadius = Math.cbrt(survivor.physicsRadius**3 + victim.physicsRadius**3);
-            // Type rules after collision:
-            // BH absorbs everything and stays BH
-            // NS/pulsar absorbs smaller body → stays NS/pulsar
-            // Star absorbs planet → stays star
+
+            // Type hierarchy: BH > NS/pulsar > star > planet/comet
             if (survivor.type === 'blackhole') {
-              // stays black hole, absorbs mass
+              // stays black hole
             } else if (survivor.type === 'neutronstar' || survivor.type === 'pulsar') {
-              // stays neutron star / pulsar
+              // stays NS/pulsar
             } else if (victim.type === 'star' || victim.type === 'neutronstar' || victim.type === 'pulsar') {
               survivor.type = 'star';
             }
-            // Comets always dissolve into their absorber — no special handling needed
-            survivor.color  = blendHex(survivor.color, victim.color, blendT);
 
-            // Re-classify survivor based on new mass+radius — merged planets may become stars, etc.
-            // Import classifyType inline to avoid circular dep — just replicate the logic
+            survivor.color = blendHex(survivor.color, victim.color, blendT);
             survivor._reclassifyAfterMerge();
 
             toRemove.add(bodies.indexOf(victim));
@@ -190,40 +176,32 @@ export class Physics {
 
     // ── Exotic body effects ─────────────────────────────
     for (let i = 0; i < bodies.length; i++) {
-      if (toRemove.has(i)) continue;   // skip victims already marked for removal
+      if (toRemove.has(i)) continue;
       const b = bodies[i];
 
-      // Spin animation for neutron stars and pulsars
       if (b.type === 'neutronstar' || b.type === 'pulsar') {
         b.spinAngle = (b.spinAngle + b.spinRate) % 360;
       }
-      // Black hole disk animation
       if (b.type === 'blackhole') {
         b.diskPhase += 0.02;
       }
 
-      // Comet coma: brighten when close to a star or massive body
       if (b.type === 'comet') {
         let nearestStarDist = Infinity;
         for (let j = 0; j < bodies.length; j++) {
-          if (j === i) continue;
-          if (bodies[j].isMassive) {
-            const dx = bodies[j].x - b.x, dy = bodies[j].y - b.y;
-            const d  = Math.sqrt(dx*dx + dy*dy);
-            if (d < nearestStarDist) nearestStarDist = d;
-          }
+          if (j === i || !bodies[j].isMassive) continue;
+          const dx = bodies[j].x - b.x, dy = bodies[j].y - b.y;
+          const d  = Math.sqrt(dx*dx + dy*dy);
+          if (d < nearestStarDist) nearestStarDist = d;
         }
-        // Coma appears inside 3 AU, full intensity at 0.5 AU
         b.comaIntensity = Math.max(0, Math.min(1, (3 - nearestStarDist) / 2.5));
       }
 
-      // Spaghettification: stretch bodies near black holes
       b.spaghetti = 0;
       for (let j = 0; j < bodies.length; j++) {
         if (j === i || bodies[j].type !== 'blackhole') continue;
         const dx = bodies[j].x - b.x, dy = bodies[j].y - b.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        // Tidal disruption radius ~ physicsRadius * (M_bh/M_body)^(1/3)
+        const dist    = Math.sqrt(dx*dx + dy*dy);
         const r_tidal = b.physicsRadius * Math.pow(bodies[j].mass / Math.max(b.mass, 1), 1/3);
         if (dist < r_tidal * 3) {
           b.spaghetti = Math.min(1, 1 - (dist - r_tidal) / (r_tidal * 2));
@@ -234,7 +212,6 @@ export class Physics {
     // ── Energy ───────────────────────────────────────────
     this._computeEnergy(bodies);
 
-    // Only set energy baseline on a collision-free step
     if (this._initEnergy === null && !hadCollision && n > 1) {
       this._initEnergy = this.totalEnergy;
     }
@@ -242,8 +219,8 @@ export class Physics {
       this.energyDrift = ((this.totalEnergy - this._initEnergy) / Math.abs(this._initEnergy)) * 100;
     }
     if (hadCollision) {
-      this._initEnergy = null;  // reset so baseline re-establishes cleanly next step
-      this._dirty = true;       // re-warmup after merge repositioning
+      this._initEnergy = null;
+      this._dirty = true;
     }
 
     this.simTime += dt;
@@ -275,12 +252,4 @@ export class Physics {
     const s = Math.pow(10, parseFloat(v));
     return s >= 10 ? s.toFixed(0)+'×' : s >= 1 ? s.toFixed(1)+'×' : s.toFixed(2)+'×';
   }
-}
-
-function blendHex(a, b, t) {
-  const pr = (h, o, l) => parseInt(h.slice(o, l), 16);
-  const r  = Math.round(pr(a,1,3) + (pr(b,1,3) - pr(a,1,3)) * t);
-  const g  = Math.round(pr(a,3,5) + (pr(b,3,5) - pr(a,3,5)) * t);
-  const bl = Math.round(pr(a,5,7) + (pr(b,5,7) - pr(a,5,7)) * t);
-  return '#' + [r,g,bl].map(v => Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
 }
