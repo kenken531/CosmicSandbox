@@ -91,6 +91,12 @@ export class Physics {
     const microDt       = dt / microSteps;
     this.lastMicroSteps = microSteps;  // exposed for HUD display
 
+    // Record trail every N substeps so curves stay smooth at high speed.
+    // Target ~10 samples per frame regardless of substep count; always
+    // record on the final substep so the trail tip is never stale.
+    const TRAIL_SAMPLES  = 10;
+    const trailStride    = Math.max(1, Math.floor(microSteps / TRAIL_SAMPLES));
+
     for (let ms = 0; ms < microSteps; ms++) {
       // Step 1: x(t+dt) = x + v·dt + ½·a·dt²
       for (let i = 0; i < n; i++) {
@@ -111,8 +117,10 @@ export class Physics {
         b.vy += 0.5 * (b._ay_old + b.ay) * microDt;
       }
 
-      // Only record trail on final micro-step — keeps trail density at 1 pt/frame
-      if (ms === microSteps - 1) {
+      // Record trail at evenly-spaced substep intervals so fast orbits
+      // produce smooth curves instead of polygons/triangles.
+      // At low speeds (1 substep) this still records once per frame.
+      if (ms % trailStride === 0 || ms === microSteps - 1) {
         for (let i = 0; i < n; i++) bodies[i].recordTrail();
       }
     }
